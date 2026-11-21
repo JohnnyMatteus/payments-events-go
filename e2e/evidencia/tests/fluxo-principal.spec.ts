@@ -28,12 +28,15 @@ const compose = (...args: string[]) =>
 const sql = (query: string) =>
   compose('exec', '-T', 'postgres', 'psql', '-U', 'payments', '-d', 'payments', '-c', query).trim();
 
-function evento(id: string, tipo: string, txn: string, pagamento: string, centavos: number, hora: string) {
+const redis = (...args: string[]) => compose('exec', '-T', 'redis', 'redis-cli', ...args).trim();
+
+function evento(id: string, tipo: string, txn: string, pagamento: string, centavos: number, hora: string,
+  lojista = 'loja_demo_001') {
   return JSON.stringify({
     id,
     type: tipo,
     created_at: `${DIA}T${hora}:00Z`,
-    data: { transaction_id: txn, payment_id: pagamento, amount: centavos, currency: 'BRL' },
+    data: { merchant_id: lojista, transaction_id: txn, payment_id: pagamento, amount: centavos, currency: 'BRL' },
   });
 }
 
@@ -47,7 +50,13 @@ async function enviar(request: APIRequestContext, corpo: string, assinatura: str
     data: corpo,
     headers: { 'Content-Type': 'application/json', 'PagaFacil-Signature': assinatura },
   });
-  return { status: resp.status(), corpo: await resp.json() };
+  return { status: resp.status(), corpo: await resp.json(), headers: resp.headers() };
+}
+
+async function enviarCronometrado(request: APIRequestContext, corpo: string) {
+  const inicio = performance.now();
+  const r = await enviar(request, corpo, assinar(corpo));
+  return { ...r, ms: Math.round((performance.now() - inicio) * 10) / 10 };
 }
 
 async function filaRabbit(request: APIRequestContext, fila: string) {
@@ -70,7 +79,7 @@ test('fluxo principal: webhook → ledger → outbox → RabbitMQ → conciliaç
     page,
     'payments-events-go — evidência do fluxo principal',
     `Processador de webhooks do provedor fictício PagaFácil Sandbox. Vamos provar, com a stack real em Docker ` +
-      `(Postgres, RabbitMQ, LocalStack S3, Jaeger): assinatura HMAC e anti-replay, idempotência, ledger + ` +
+      `(Postgres, RabbitMQ, LocalStack S3, Jaeger): assinatura HMAC e anti-replay, idempotência com atalho no Redis, rate limit por lojista, ledger + ` +
       `transactional outbox, consumidor com DLQ, conciliação do extrato e observabilidade. Gravado em ` +
       `${new Date().toLocaleString('pt-BR')}.`,
     { pausaMs: 4000 },
@@ -78,23 +87,51 @@ test('fluxo principal: webhook → ledger → outbox → RabbitMQ → conciliaç
 
   // 1. Captura com assinatura válida.
   const captura = evento('evt_demo_001', 'payment.captured', 'txn_demo_001', 'pay_demo_001', 15000, '12:00');
-  const r1 = await enviar(request, captura, assinar(captura));
+  const r1 = await enviarCronometrado(request, captura);
   expect(r1.status).toBe(200);
   expect(r1.corpo).toEqual({ event_id: 'evt_demo_001', status: 'recorded' });
-  await narrar(page, '1. Webhook de captura com HMAC válido', `Corpo: ${captura}. Header PagaFacil-Signature = t=<agora>,v1=HMAC-SHA256("t.corpo"). O evento é gravado no ledger.`, {
-    chamada: { metodo: 'POST', url: WEBHOOK, ...r1 },
+  await narrar(page, '1. Webhook de captura com HMAC válido', `Corpo: ${captura}. Header PagaFacil-Signature = t=<agora>,v1=HMAC-SHA256("t.corpo"). O evento é gravado no ledger (${r1.ms} ms, passando pelo Postgres).`, {
+    chamada: { metodo: 'POST', url: WEBHOOK, status: r1.status, corpo: r1.corpo },
   });
 
   // 2. Reentrega do mesmo evento.
-  const r2 = await enviar(request, captura, assinar(captura));
+  const r2 = await enviarCronometrado(request, captura);
   expect(r2.status).toBe(200);
   expect(r2.corpo).toEqual({ event_id: 'evt_demo_001', status: 'duplicate' });
   const contagem = sql("select count(*) as lancamentos_evt_demo_001 from ledger_entries where event_id = 'evt_demo_001'");
   expect(contagem).toMatch(/\n\s*1\n/);
-  await narrar(page, '2. Reentrega do mesmo evento: idempotência', 'O provedor reenviou evt_demo_001. A API responde 200 com status "duplicate" (para o provedor parar de tentar) e não cria um segundo lançamento.', {
-    chamada: { metodo: 'POST', url: WEBHOOK, ...r2 },
+  await narrar(page, '2. Reentrega do mesmo evento: idempotência', `O provedor reenviou evt_demo_001. A API responde 200 com status "duplicate" (para o provedor parar de tentar) e não cria um segundo lançamento. Primeira entrega: ${r1.ms} ms; reentrega: ${r2.ms} ms.`, {
+    chamada: { metodo: 'POST', url: WEBHOOK, status: r2.status, corpo: r2.corpo },
     rotuloSaida: 'docker compose exec postgres psql (consulta real)',
     saida: contagem,
+  });
+
+  // 2b. Atalho no Redis: SET NX com TTL antes do INSERT.
+  const chaveIdem = 'payments:idem:evt_demo_001';
+  const valorIdem = redis('GET', chaveIdem);
+  const ttlIdem = Number(redis('TTL', chaveIdem));
+  expect(valorIdem).toBe('done');
+  expect(ttlIdem).toBeGreaterThan(23 * 3600);
+  const fastpath = linhasMetricas(await (await request.get(`${API}/metrics`)).text(), ['idempotency_fastpath_total']);
+  expect(fastpath).toMatch(/result="acquired"} 1/);
+  expect(fastpath).toMatch(/result="done"} 1/);
+  await narrar(page, '2b. Reentrega respondida pelo Redis, sem ir ao Postgres', 'Antes do INSERT a API faz SET NX GET com TTL. Na primeira entrega a chave não existia (acquired) e, gravado o evento, virou "done" por 24 h. Na reentrega o Redis já respondia "done": o banco nem foi consultado.', {
+    rotuloSaida: 'docker compose exec redis redis-cli GET/TTL  +  GET /metrics',
+    saida: `GET ${chaveIdem}  →  "${valorIdem}"\nTTL ${chaveIdem}  →  ${ttlIdem} s\n\n${fastpath}`,
+    pausaMs: 4000,
+  });
+
+  // 2c. Sem o Redis, o Postgres continua garantindo.
+  expect(redis('DEL', chaveIdem)).toBe('1');
+  const r2c = await enviarCronometrado(request, captura);
+  expect(r2c.status).toBe(200);
+  expect(r2c.corpo).toEqual({ event_id: 'evt_demo_001', status: 'duplicate' });
+  const contagem2 = sql("select count(*) as lancamentos_evt_demo_001 from ledger_entries where event_id = 'evt_demo_001'");
+  expect(contagem2).toMatch(/\n\s*1\n/);
+  await narrar(page, '2c. Chave apagada do Redis: o Postgres segue como garantia', `redis-cli DEL ${chaveIdem} e o mesmo evento de novo: sem atalho, a constraint única do Postgres decide e a resposta continua "duplicate" (${r2c.ms} ms). Ainda um único lançamento.`, {
+    chamada: { metodo: 'POST', url: WEBHOOK, status: r2c.status, corpo: r2c.corpo },
+    rotuloSaida: 'docker compose exec postgres psql (consulta real)',
+    saida: contagem2,
   });
 
   // 3a. Assinatura inválida.
@@ -114,14 +151,47 @@ test('fluxo principal: webhook → ledger → outbox → RabbitMQ → conciliaç
     chamada: { metodo: 'POST', url: WEBHOOK, ...r4 },
   });
 
-  // Mais dois eventos do dia, usados na conciliação.
+  // 3c. Limite por lojista (contagem no Redis, janela de 1 minuto).
+  const segundos = new Date().getSeconds();
+  if (segundos > 50) await page.waitForTimeout((61 - segundos) * 1000);
+  const rajada: { status: number; corpo: any; headers: Record<string, string> }[] = [];
+  for (let i = 1; i <= 22; i++) {
+    const id = `evt_rajada_${String(i).padStart(2, '0')}`;
+    const corpo = evento(id, 'payment.dispute_opened', `txn_rajada_${i}`, 'pay_rajada', 1, '16:00', 'loja_demo_rajada');
+    rajada.push(await enviar(request, corpo, assinar(corpo)));
+  }
+  const aceitos = rajada.filter((r) => r.status === 200).length;
+  const limitados = rajada.filter((r) => r.status === 429);
+  expect(aceitos).toBe(20);
+  expect(limitados.length).toBe(2);
+  expect(limitados[0].corpo.type).toContain('rate_limited');
+  expect(Number(limitados[0].headers['retry-after'])).toBeGreaterThan(0);
+  const chavesLimite = redis('--scan', '--pattern', 'payments:ratelimit:merchant:*');
+  const chaveRajada = chavesLimite.split('\n').find((k) => k.includes('loja_demo_rajada'))!;
+  const contador = redis('GET', chaveRajada);
+  expect(contador).toBe('22');
+  await narrar(page, '3c. Rate limit por lojista → 429', `loja_demo_rajada enviou 22 webhooks válidos em sequência: ${aceitos} aceitos, ${limitados.length} recusados com 429 e Retry-After. O contador fica no Redis (INCR + EXPIRE NX numa transação), então vale para todas as réplicas da API.`, {
+    chamada: { metodo: 'POST', url: WEBHOOK, status: limitados[0].status, corpo: {
+      headers: {
+        'retry-after': limitados[0].headers['retry-after'],
+        'ratelimit-limit': limitados[0].headers['ratelimit-limit'],
+        'ratelimit-remaining': limitados[0].headers['ratelimit-remaining'],
+      },
+      body: limitados[0].corpo,
+    } },
+    rotuloSaida: 'docker compose exec redis redis-cli',
+    saida: `--scan --pattern payments:ratelimit:merchant:*\n${chavesLimite}\n\nGET ${chaveRajada}  →  ${contador}\nTTL  →  ${redis('TTL', chaveRajada)} s`,
+    pausaMs: 4500,
+  });
+
+  // Mais dois eventos do dia, usados na conciliação (outro lojista, não afetado pelo limite).
   const estorno = evento('evt_demo_002', 'payment.refunded', 'txn_demo_002', 'pay_demo_001', 2500, '13:00');
   const captura2 = evento('evt_demo_003', 'payment.captured', 'txn_demo_003', 'pay_demo_002', 8000, '14:00');
   const r5 = await enviar(request, estorno, assinar(estorno));
   const r6 = await enviar(request, captura2, assinar(captura2));
   expect([r5.status, r6.status]).toEqual([200, 200]);
   expect([r5.corpo.status, r6.corpo.status]).toEqual(['recorded', 'recorded']);
-  await narrar(page, 'Mais dois eventos do dia', 'Um estorno de R$ 25,00 (evt_demo_002) e uma captura de R$ 80,00 (evt_demo_003), ambos aceitos.', {
+  await narrar(page, 'Mais dois eventos do dia', 'Um estorno de R$ 25,00 (evt_demo_002) e uma captura de R$ 80,00 (evt_demo_003) de loja_demo_001, aceitos logo depois da rajada: o limite é por lojista.', {
     rotuloSaida: 'respostas reais da API',
     saida: JSON.stringify([r5.corpo, r6.corpo], null, 2),
   });
@@ -255,22 +325,26 @@ test('fluxo principal: webhook → ledger → outbox → RabbitMQ → conciliaç
   const metricasConsumer = await (await request.get(`${CONSUMER_OPS}/metrics`)).text();
   const metricasRelay = await (await request.get(`${RELAY_OPS}/metrics`)).text();
   const webhook = linhasMetricas(metricasApi, ['webhook_requests_total']);
-  expect(webhook).toMatch(/outcome="duplicate"} 1/);
+  expect(webhook).toMatch(/outcome="duplicate"} 2/);
+  expect(webhook).toMatch(/outcome="rate_limited"} 2/);
+  expect(webhook).toMatch(/outcome="ignored"} 20/);
   expect(webhook).toMatch(/outcome="invalid_signature"} 1/);
   expect(webhook).toMatch(/outcome="stale_timestamp"} 1/);
   expect(webhook).toMatch(/outcome="recorded"} 3/);
+  const idem = linhasMetricas(metricasApi, ['idempotency_fastpath_total']);
   const consumidor = linhasMetricas(metricasConsumer, ['consumer_messages_total']);
   expect(consumidor).toMatch(/outcome="dead_lettered"} 1/);
   await narrar(page, 'Métricas em /metrics', 'Contadores reais expostos no formato Prometheus pela API (:8085), relay (:9101) e consumidor (:9102).', {
     rotuloSaida: 'GET /metrics (linhas filtradas)',
-    saida: [webhook, consumidor, linhasMetricas(metricasRelay, ['outbox_'])].join('\n'),
+    saida: [webhook, idem, consumidor, linhasMetricas(metricasRelay, ['outbox_'])].join('\n'),
     pausaMs: 4500,
   });
 
   await narrar(
     page,
     'Resumo: o que foi provado',
-    '✔ HMAC válido → 200 recorded   ✔ reentrega → duplicate, 1 só lançamento   ✔ assinatura inválida e replay → 401   ' +
+    '✔ HMAC válido → 200 recorded   ✔ reentrega → duplicate pelo Redis, sem ir ao banco; sem a chave, o Postgres garante   ' +
+      '✔ assinatura inválida e replay → 401   ✔ rate limit por lojista no Redis → 429 com Retry-After   ' +
       '✔ ledger + outbox publicados no RabbitMQ   ✔ consumidor projetou saldos; erro permanente foi para a DLQ   ' +
       '✔ extrato no S3 conciliado: 1 ok, 1 faltando, 1 sobrando, 1 valor divergente   ✔ trace em 3 serviços no Jaeger e métricas em /metrics.',
     { pausaMs: 4500 },
