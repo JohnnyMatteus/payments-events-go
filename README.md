@@ -129,6 +129,7 @@ Para defender o núcleo numa entrevista: [roteiro de idempotência](docs/roteiro
 
 ## Próximos passos
 
+- Validar no CI o que não foi exercitado localmente nesta rodada (Docker local saturado): `docker build` da imagem final, subida completa do `docker-compose` com `make up && make seed && make reconcile` e a suíte `make test-integration` com o LocalStack e o teste ponta a ponta na versão final.
 - Helm chart e manifests Kubernetes (Deployments, CronJob de conciliação, HPA, probes) e GitOps com ArgoCD.
 - Segredos do webhook no Secrets Manager/Vault e notificação S3 → SQS para disparar a conciliação.
 - Retenção e particionamento de `processed_events` e `ledger_entries`; limpeza do outbox publicado.

@@ -272,6 +272,7 @@ Detalhes em [observabilidade.md](observabilidade.md) e ADR [0008](adr/0008-obser
 
 ## 10. Plano de evolução
 
+0. **Validação pendente da fundação**: `docker build` da imagem final, subida completa do compose (`make up && make seed && make reconcile`) e a suíte de integração com LocalStack e o e2e na versão final ficam para o CI; localmente foram validados os testes unitários, o lint, `docker compose config`, o `helm lint` e, em versão anterior, os testes de integração de PostgreSQL e RabbitMQ.
 1. **Kubernetes e Helm**: chart com Deployments para `api`, `relay` e `consumer`, CronJob para `reconcile`, probes em `/healthz` e `/readyz`, HPA na API e PodDisruptionBudget; GitOps com ArgoCD.
 2. **Segredos**: Secrets Manager (LocalStack localmente) ou Vault para `WEBHOOK_SECRETS` e credenciais.
 3. **Chegada do extrato**: notificação S3 → SQS para disparar a conciliação assim que o arquivo chega.
