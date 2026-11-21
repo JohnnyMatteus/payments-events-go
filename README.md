@@ -24,6 +24,7 @@ flowchart LR
     P -- extrato CSV --> S3[(S3 / LocalStack)]
     subgraph payments-events-go
       API[api] -->|1 transação: evento + lançamento + outbox| DB[(PostgreSQL)]
+      API -.->|SET NX idempotência / rate limit por lojista| REDIS[(Redis)]
       RELAY[relay] -->|SKIP LOCKED| DB
       RELAY -->|publisher confirms| MQ{{RabbitMQ}}
       MQ --> CONS[consumer idempotente]
@@ -39,7 +40,7 @@ flowchart LR
 cmd/payments/              composição e subcomandos
 internal/domain/           regras puras: evento, lançamento, conciliação, dinheiro
 internal/app/              casos de uso e portas (interfaces)
-internal/adapter/          httpapi, postgres (+ migrations), rabbitmq, objectstore (S3), csvstatement, reportout
+internal/adapter/          httpapi, postgres (+ migrations), rabbitmq, redisstore, objectstore (S3), csvstatement, reportout
 internal/platform/         config por ambiente, observabilidade (slog, OpenTelemetry)
 internal/testinfra/        contêineres para testes de integração (build tag integration)
 docs/                      design doc, ADRs, roteiros e observabilidade
@@ -53,7 +54,7 @@ Pré-requisitos: Docker com Compose v2, `make`, `openssl` e `curl`. Go 1.26+ só
 
 ```bash
 cp .env.example .env
-make up          # Postgres, RabbitMQ, LocalStack (S3), migrate, api, relay, consumer
+make up          # Postgres, RabbitMQ, Redis, LocalStack (S3), migrate, api, relay, consumer
 make seed        # webhooks de exemplo + extrato do provedor no S3
 make reconcile   # concilia o extrato de 2026-11-20 com o ledger
 ```
@@ -82,6 +83,7 @@ Outros alvos: `make up-observability` (Jaeger em http://localhost:16687 e Promet
 | RabbitMQ UI | http://localhost:15673 |
 | PostgreSQL | localhost:5434 |
 | LocalStack (S3) | http://localhost:4567 |
+| Redis | localhost:6381 |
 
 As portas evitam colisão com os outros projetos do portfólio e podem ser trocadas no `.env`.
 
@@ -110,7 +112,8 @@ make evidencia
 
 Recria a stack do zero (núcleo + Jaeger e Prometheus) e roda o spec Playwright de `e2e/evidencia/`, que grava um
 vídeo em `e2e/evidencia/test-results/`. O vídeo mostra, com chamadas reais: webhook com HMAC válido (200), reentrega
-idempotente (`duplicate`), assinatura inválida e timestamp antigo (401), ledger e outbox consultados no Postgres, a
+idempotente (`duplicate`) respondida pelo Redis e, sem a chave, pelo Postgres, rate limit por lojista (429),
+assinatura inválida e timestamp antigo (401), ledger e outbox consultados no Postgres, a
 fila e o consumidor no RabbitMQ Management, uma mensagem inválida indo para a DLQ, o extrato enviado ao S3 do
 LocalStack, o relatório de conciliação (faltando, sobrando e valor divergente), o trace no Jaeger e as métricas em
 `/metrics`. Requer Node 20+.
@@ -128,6 +131,9 @@ LocalStack, o relatório de conciliação (faltando, sobrando e valor divergente
 | Extrato no S3 com endpoint configurável, LocalStack no ambiente local | [0007](docs/adr/0007-extrato-no-s3-com-localstack.md) |
 | OpenTelemetry (traces OTLP e métricas Prometheus) e slog | [0008](docs/adr/0008-observabilidade-opentelemetry.md) |
 | Testes de integração com testcontainers sob build tag | [0009](docs/adr/0009-testes-de-integracao-com-testcontainers.md) |
+| Redis como atalho de idempotência (o Postgres segue como garantia) e limite por lojista, fail-open | [0010](docs/adr/0010-redis-atalho-de-idempotencia-e-rate-limit.md) |
+
+Padrões de projeto e SOLID com os trechos reais do código: [docs/arquitetura/padroes.md](docs/arquitetura/padroes.md).
 
 Para defender o núcleo numa entrevista: [roteiro de idempotência](docs/roteiros/idempotencia.md) e [roteiro de conciliação](docs/roteiros/conciliacao.md).
 

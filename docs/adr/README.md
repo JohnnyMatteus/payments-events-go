@@ -13,3 +13,4 @@ Formato: Contexto, Decisão, Consequências e Alternativas. Um ADR por decisão;
 | [0007](0007-extrato-no-s3-com-localstack.md) | Extrato do provedor no S3, emulado com LocalStack no ambiente local | Aceito |
 | [0008](0008-observabilidade-opentelemetry.md) | Observabilidade com OpenTelemetry, Prometheus e slog | Aceito |
 | [0009](0009-testes-de-integracao-com-testcontainers.md) | Testes de integração com testcontainers-go sob build tag | Aceito |
+| [0010](0010-redis-atalho-de-idempotencia-e-rate-limit.md) | Redis como atalho de idempotência e limite por lojista | Aceito |
