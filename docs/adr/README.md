@@ -1,0 +1,15 @@
+# Architecture Decision Records
+
+Formato: Contexto, Decisão, Consequências e Alternativas. Um ADR por decisão; uma decisão revista ganha um ADR novo que substitui o antigo.
+
+| ADR | Decisão | Status |
+| --- | --- | --- |
+| [0001](0001-arquitetura-hexagonal-binario-unico.md) | Arquitetura hexagonal num binário único com subcomandos | Aceito |
+| [0002](0002-idempotencia-por-constraint-unica.md) | Idempotência por `event_id` com constraint única no PostgreSQL | Aceito |
+| [0003](0003-transactional-outbox-com-polling.md) | Transactional outbox com relay por polling e `SKIP LOCKED` | Aceito |
+| [0004](0004-rabbitmq-quorum-confirms-dlq.md) | RabbitMQ com filas quorum, publisher confirms, limite de entregas e DLQ | Aceito |
+| [0005](0005-assinatura-hmac-e-janela-anti-replay.md) | Webhook autenticado por HMAC-SHA256 com timestamp e janela anti-replay | Aceito |
+| [0006](0006-conciliacao-por-transaction-id.md) | Conciliação por `transaction_id` em período semiaberto UTC | Aceito |
+| [0007](0007-extrato-no-s3-com-localstack.md) | Extrato do provedor no S3, emulado com LocalStack no ambiente local | Aceito |
+| [0008](0008-observabilidade-opentelemetry.md) | Observabilidade com OpenTelemetry, Prometheus e slog | Aceito |
+| [0009](0009-testes-de-integracao-com-testcontainers.md) | Testes de integração com testcontainers-go sob build tag | Aceito |
