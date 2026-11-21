@@ -48,6 +48,7 @@ func (p webhookPayload) toEvent() domain.Event {
 	return domain.Event{
 		ID:            p.ID,
 		Type:          domain.EventType(p.Type),
+		MerchantID:    p.Data.MerchantID,
 		TransactionID: p.Data.TransactionID,
 		PaymentID:     p.Data.PaymentID,
 		AmountCents:   p.Data.Amount,

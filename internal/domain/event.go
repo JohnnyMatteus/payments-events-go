@@ -30,6 +30,7 @@ const (
 type Event struct {
 	ID            string
 	Type          EventType
+	MerchantID    string
 	TransactionID string
 	PaymentID     string
 	AmountCents   int64

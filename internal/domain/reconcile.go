@@ -43,6 +43,28 @@ type Divergence struct {
 	Detail        string
 }
 
+// DeltaCents é quanto falta somar ao ledger, com sinal, para ele bater com o
+// extrato nesta transação.
+func (d Divergence) DeltaCents() int64 {
+	var delta int64
+	if d.Statement != nil {
+		delta += d.Statement.signedCents()
+	}
+	if d.Ledger != nil {
+		delta -= d.Ledger.SignedCents()
+	}
+	return delta
+}
+
+// Match é um par conciliado: a linha do extrato e o lançamento efetivo do
+// ledger (já somados os ajustes). Adjusted indica que o par só fecha por
+// causa de um lançamento de ajuste aprovado.
+type Match struct {
+	Statement StatementLine
+	Ledger    LedgerEntry
+	Adjusted  bool
+}
+
 // Period é um intervalo semiaberto [From, To) em UTC.
 type Period struct {
 	From time.Time
@@ -60,6 +82,8 @@ type Report struct {
 	StatementLines     int
 	LedgerEntries      int
 	Matched            int
+	Matches            []Match
+	Reversed           int
 	SkippedOutOfPeriod int
 	StatementNetCents  int64
 	LedgerNetCents     int64
@@ -85,15 +109,13 @@ func (r Report) CountByKind() map[DivergenceKind]int {
 func Reconcile(period Period, statement []StatementLine, ledger []LedgerEntry) Report {
 	report := Report{Period: period}
 
-	byTx := make(map[string]LedgerEntry, len(ledger))
+	byTx, adjusted := effectiveEntries(period, ledger)
 	for _, e := range ledger {
-		if !period.Contains(e.OccurredAt) {
-			continue
+		if period.Contains(e.OccurredAt) {
+			report.LedgerNetCents += e.SignedCents()
 		}
-		byTx[e.TransactionID] = e
-		report.LedgerEntries++
-		report.LedgerNetCents += e.SignedCents()
 	}
+	report.LedgerEntries = len(byTx)
 
 	seen := make(map[string]bool, len(statement))
 	for i := range statement {
@@ -136,10 +158,16 @@ func Reconcile(period Period, statement []StatementLine, ledger []LedgerEntry) R
 			continue
 		}
 		report.Matched++
+		report.Matches = append(report.Matches, Match{Statement: line, Ledger: entry, Adjusted: adjusted[line.TransactionID]})
 	}
 
 	for tx, entry := range byTx {
 		if seen[tx] {
+			continue
+		}
+		// Estornado por ajuste: o ledger reconhece que o provedor não liquidou.
+		if entry.AmountCents == 0 {
+			report.Reversed++
 			continue
 		}
 		report.Divergences = append(report.Divergences, Divergence{
@@ -150,6 +178,12 @@ func Reconcile(period Period, statement []StatementLine, ledger []LedgerEntry) R
 		})
 	}
 
+	slices.SortFunc(report.Matches, func(a, b Match) int {
+		return cmp.Or(
+			cmp.Compare(a.Statement.LineNumber, b.Statement.LineNumber),
+			cmp.Compare(a.Statement.TransactionID, b.Statement.TransactionID),
+		)
+	})
 	slices.SortFunc(report.Divergences, func(a, b Divergence) int {
 		return cmp.Or(
 			cmp.Compare(a.Kind, b.Kind),
@@ -158,6 +192,42 @@ func Reconcile(period Period, statement []StatementLine, ledger []LedgerEntry) R
 		)
 	})
 	return report
+}
+
+// effectiveEntries agrupa os lançamentos do período por transação, somando
+// cada ajuste à transação que ele corrige. O lançamento efetivo carrega o
+// valor líquido; zero significa transação estornada por ajuste.
+func effectiveEntries(period Period, ledger []LedgerEntry) (map[string]LedgerEntry, map[string]bool) {
+	byTx := make(map[string]LedgerEntry, len(ledger))
+	net := make(map[string]int64, len(ledger))
+	adjusted := make(map[string]bool)
+	for _, e := range ledger {
+		if !period.Contains(e.OccurredAt) {
+			continue
+		}
+		key := e.TransactionID
+		if e.AdjustsTransactionID != "" {
+			key = e.AdjustsTransactionID
+			adjusted[key] = true
+		}
+		// O lançamento do provedor dá a identidade (evento, pagamento, data);
+		// o ajuste só a fornece quando a transação não tem outro lançamento.
+		if _, ok := byTx[key]; !ok || e.AdjustsTransactionID == "" {
+			base := e
+			base.TransactionID = key
+			base.AdjustsTransactionID = ""
+			byTx[key] = base
+		}
+		net[key] += e.SignedCents()
+	}
+	for key, e := range byTx {
+		e.Direction, e.AmountCents = Credit, net[key]
+		if net[key] < 0 {
+			e.Direction, e.AmountCents = Debit, -net[key]
+		}
+		byTx[key] = e
+	}
+	return byTx, adjusted
 }
 
 func compare(line StatementLine, entry LedgerEntry) string {

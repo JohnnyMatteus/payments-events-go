@@ -15,12 +15,16 @@ const (
 // novos lançamentos, nunca com UPDATE.
 type LedgerEntry struct {
 	EventID       string
+	MerchantID    string
 	TransactionID string
 	PaymentID     string
 	Direction     Direction
 	AmountCents   int64
 	Currency      Currency
 	OccurredAt    time.Time
+	// AdjustsTransactionID aponta a transação corrigida por um lançamento de
+	// ajuste; vazio nos lançamentos que vieram do provedor.
+	AdjustsTransactionID string
 }
 
 // NewLedgerEntry deriva o lançamento de um evento já validado. O segundo
@@ -32,6 +36,7 @@ func NewLedgerEntry(e Event) (LedgerEntry, bool) {
 	}
 	return LedgerEntry{
 		EventID:       e.ID,
+		MerchantID:    e.MerchantID,
 		TransactionID: e.TransactionID,
 		PaymentID:     e.PaymentID,
 		Direction:     dir,
