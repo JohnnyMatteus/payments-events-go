@@ -36,6 +36,12 @@ type Config struct {
 	S3Endpoint     string
 	AWSRegion      string
 	S3UsePathStyle bool
+
+	RedisURL            string
+	IdempotencyClaimTTL time.Duration
+	IdempotencyDoneTTL  time.Duration
+	WebhookRateLimit    int
+	WebhookRateWindow   time.Duration
 }
 
 // Load lê as variáveis com valores padrão seguros para desenvolvimento.
@@ -68,6 +74,12 @@ func Load(getenv func(string) string) (Config, error) {
 		S3Endpoint:     p.str("S3_ENDPOINT", ""),
 		AWSRegion:      p.str("AWS_REGION", "us-east-1"),
 		S3UsePathStyle: p.boolean("S3_USE_PATH_STYLE", false),
+
+		RedisURL:            p.str("REDIS_URL", ""),
+		IdempotencyClaimTTL: p.duration("IDEMPOTENCY_CLAIM_TTL", 30*time.Second),
+		IdempotencyDoneTTL:  p.duration("IDEMPOTENCY_DONE_TTL", 24*time.Hour),
+		WebhookRateLimit:    p.positiveInt("WEBHOOK_RATE_LIMIT", 600),
+		WebhookRateWindow:   p.duration("WEBHOOK_RATE_WINDOW", time.Minute),
 	}
 	return cfg, errors.Join(p.errs...)
 }

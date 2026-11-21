@@ -27,6 +27,7 @@ const (
 	PostgresImage   = "postgres:17.6-alpine"
 	RabbitMQImage   = "rabbitmq:4.1.4-management-alpine"
 	LocalStackImage = "localstack/localstack:4.5.0"
+	RedisImage      = "redis:7.4.6-alpine"
 )
 
 // startupTimeout é generoso porque o Docker local costuma estar dividido com

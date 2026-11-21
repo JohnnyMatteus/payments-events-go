@@ -105,3 +105,39 @@ type StatementReader interface {
 type ProjectionRepository interface {
 	ApplyOnce(ctx context.Context, consumer, messageID string, msg LedgerEntryRecorded) (bool, error)
 }
+
+// ClaimState é o que o atalho de idempotência sabe sobre um event_id.
+type ClaimState int
+
+// Estados possíveis de um claim.
+const (
+	// ClaimAcquired: ninguém viu o evento; este processo segue para o banco.
+	ClaimAcquired ClaimState = iota + 1
+	// ClaimInFlight: outro processo está gravando o mesmo evento agora.
+	ClaimInFlight
+	// ClaimDone: o evento já foi gravado com sucesso.
+	ClaimDone
+)
+
+// IdempotencyCache é um atalho na frente do banco para reentregas. Não é a
+// garantia de idempotência (essa é a constraint única no Postgres, ADR 0002):
+// perder o cache só faz a requisição ir ao banco.
+type IdempotencyCache interface {
+	Claim(ctx context.Context, eventID string) (ClaimState, error)
+	Complete(ctx context.Context, eventID string) error
+	Release(ctx context.Context, eventID string) error
+}
+
+// RateDecision é a resposta do limitador para uma chave.
+type RateDecision struct {
+	Allowed    bool
+	Limit      int
+	Remaining  int
+	RetryAfter time.Duration
+}
+
+// RateLimiter conta requisições por chave numa janela compartilhada entre
+// réplicas.
+type RateLimiter interface {
+	Allow(ctx context.Context, key string) (RateDecision, error)
+}

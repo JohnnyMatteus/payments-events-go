@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -25,10 +26,8 @@ const instrumentationName = "github.com/JohnnyMatteus/payments-events-go/interna
 // MaxBodyBytes limita o tamanho do corpo aceito no webhook.
 const MaxBodyBytes = 1 << 20
 
-// Ingester é a porta de entrada usada pelo handler (implementada por app.IngestService).
-type Ingester interface {
-	Ingest(ctx context.Context, ev domain.Event, raw []byte) (app.IngestOutcome, error)
-}
+// Ingester é a porta de entrada usada pelo handler.
+type Ingester = app.Ingester
 
 // webhookPayload é o contrato JSON do webhook do PagaFácil Sandbox.
 // Campos desconhecidos são ignorados (tolerant reader).
@@ -37,6 +36,7 @@ type webhookPayload struct {
 	Type      string    `json:"type"`
 	CreatedAt time.Time `json:"created_at"`
 	Data      struct {
+		MerchantID    string `json:"merchant_id"`
 		TransactionID string `json:"transaction_id"`
 		PaymentID     string `json:"payment_id"`
 		Amount        int64  `json:"amount"`
@@ -60,18 +60,32 @@ func (p webhookPayload) toEvent() domain.Event {
 type WebhookHandler struct {
 	verifier *Verifier
 	ingester Ingester
+	limiter  app.RateLimiter
 	logger   *slog.Logger
 	requests metric.Int64Counter
 }
 
+// WebhookOption configura dependências opcionais do handler.
+type WebhookOption func(*WebhookHandler)
+
+// WithRateLimiter limita as requisições por lojista (data.merchant_id).
+func WithRateLimiter(l app.RateLimiter) WebhookOption {
+	return func(h *WebhookHandler) { h.limiter = l }
+}
+
 // NewWebhookHandler cria o handler e registra a métrica webhook_requests_total.
-func NewWebhookHandler(verifier *Verifier, ingester Ingester, logger *slog.Logger) (*WebhookHandler, error) {
+func NewWebhookHandler(verifier *Verifier, ingester Ingester, logger *slog.Logger,
+	opts ...WebhookOption) (*WebhookHandler, error) {
 	requests, err := otel.Meter(instrumentationName).Int64Counter("webhook_requests_total",
 		metric.WithDescription("Webhooks recebidos por resultado."))
 	if err != nil {
 		return nil, err
 	}
-	return &WebhookHandler{verifier: verifier, ingester: ingester, logger: logger, requests: requests}, nil
+	h := &WebhookHandler{verifier: verifier, ingester: ingester, logger: logger, requests: requests}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h, nil
 }
 
 // ServeHTTP implementa o fluxo: limitar corpo, verificar assinatura e janela
@@ -109,7 +123,13 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	trace.SpanFromContext(ctx).SetAttributes(
 		attribute.String("payment.event_id", ev.ID),
 		attribute.String("payment.event_type", string(ev.Type)),
+		attribute.String("payment.merchant_id", payload.Data.MerchantID),
 	)
+	// O limite vem depois da assinatura: requisições forjadas não consomem
+	// a cota de um lojista.
+	if !h.allow(ctx, w, payload.Data.MerchantID) {
+		return
+	}
 
 	outcome, err := h.ingester.Ingest(ctx, ev, body)
 	switch {
@@ -127,6 +147,32 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.logger.InfoContext(ctx, "webhook processed",
 		slog.String("event_id", ev.ID), slog.String("event_type", string(ev.Type)), slog.String("outcome", string(outcome)))
 	writeJSON(w, http.StatusOK, map[string]string{"event_id": ev.ID, "status": string(outcome)})
+}
+
+// allow aplica o limite por lojista. Se o limitador falhar, a requisição
+// segue: perder o limite é melhor que recusar pagamentos.
+func (h *WebhookHandler) allow(ctx context.Context, w http.ResponseWriter, merchantID string) bool {
+	if h.limiter == nil {
+		return true
+	}
+	if merchantID == "" {
+		merchantID = "unknown"
+	}
+	decision, err := h.limiter.Allow(ctx, "merchant:"+merchantID)
+	if err != nil {
+		h.logger.WarnContext(ctx, "rate limiter unavailable, allowing request", slog.Any("error", err))
+		return true
+	}
+	w.Header().Set("RateLimit-Limit", strconv.Itoa(decision.Limit))
+	w.Header().Set("RateLimit-Remaining", strconv.Itoa(decision.Remaining))
+	if decision.Allowed {
+		return true
+	}
+	retry := max(int(decision.RetryAfter.Round(time.Second).Seconds()), 1)
+	w.Header().Set("Retry-After", strconv.Itoa(retry))
+	h.reject(ctx, w, http.StatusTooManyRequests, "rate_limited",
+		"limite de requisições do lojista "+merchantID+" excedido", nil)
+	return false
 }
 
 func (h *WebhookHandler) reject(ctx context.Context, w http.ResponseWriter, status int, outcome, detail string, err error) {
