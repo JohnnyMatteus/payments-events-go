@@ -7,7 +7,7 @@
 #
 # Use o Makefile: `make up`, `make up-observability`, `make reconcile`.
 # Senhas e chaves abaixo são exclusivamente de desenvolvimento.
-name: payments-events
+name: payments-events-go
 
 x-app: &app
   build:

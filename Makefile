@@ -54,7 +54,7 @@ seed: ## Envia webhooks de exemplo e publica o extrato no S3 local
 
 .PHONY: reconcile
 reconcile: ## Concilia o extrato do S3 com o ledger (RECONCILE_DATE=AAAA-MM-DD)
-	RECONCILE_DATE=$(RECONCILE_DATE) $(COMPOSE) --profile tools run --rm reconcile
+	RECONCILE_DATE=$(RECONCILE_DATE) $(COMPOSE) --profile core --profile tools run --rm reconcile
 
 .PHONY: clean
 clean: ## Remove contêineres, volumes e binários locais
