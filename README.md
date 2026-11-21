@@ -102,6 +102,19 @@ Os testes de integração ficam sob a build tag `integration` e são pulados se 
 - Mensagem venenosa vai direto para a DLQ; falha transitória é reentregue até o limite.
 - Teste ponta a ponta: webhook assinado → ledger → outbox → RabbitMQ → projeção → conciliação a partir de um extrato no S3.
 
+## Evidência
+
+```bash
+make evidencia
+```
+
+Recria a stack do zero (núcleo + Jaeger e Prometheus) e roda o spec Playwright de `e2e/evidencia/`, que grava um
+vídeo em `e2e/evidencia/test-results/`. O vídeo mostra, com chamadas reais: webhook com HMAC válido (200), reentrega
+idempotente (`duplicate`), assinatura inválida e timestamp antigo (401), ledger e outbox consultados no Postgres, a
+fila e o consumidor no RabbitMQ Management, uma mensagem inválida indo para a DLQ, o extrato enviado ao S3 do
+LocalStack, o relatório de conciliação (faltando, sobrando e valor divergente), o trace no Jaeger e as métricas em
+`/metrics`. Requer Node 20+.
+
 ## Decisões principais
 
 | Decisão | ADR |

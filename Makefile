@@ -56,6 +56,12 @@ seed: ## Envia webhooks de exemplo e publica o extrato no S3 local
 reconcile: ## Concilia o extrato do S3 com o ledger (RECONCILE_DATE=AAAA-MM-DD)
 	RECONCILE_DATE=$(RECONCILE_DATE) $(COMPOSE) --profile core --profile tools run --rm reconcile
 
+.PHONY: evidencia
+evidencia: ## Recria a stack (com observabilidade) e grava o vídeo de evidência com Playwright
+	$(ALL) down -v --remove-orphans
+	$(MAKE) up-observability
+	cd e2e/evidencia && npm ci && npx playwright install chromium && npx playwright test
+
 .PHONY: clean
 clean: ## Remove contêineres, volumes e binários locais
 	$(ALL) down -v --remove-orphans
