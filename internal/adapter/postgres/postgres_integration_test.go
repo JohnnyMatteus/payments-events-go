@@ -23,9 +23,12 @@ var pool *pgxpool.Pool
 
 func TestMain(m *testing.M) {
 	os.Exit(testinfra.Run(m, func(ctx context.Context) (func(), error) {
-		p, teardown, err := testinfra.StartPostgres(ctx)
-		pool = p
-		return teardown, err
+		pg, teardown, err := testinfra.StartPostgres(ctx)
+		if err != nil {
+			return nil, err
+		}
+		pool = pg.Pool
+		return teardown, nil
 	}))
 }
 
