@@ -1,0 +1,27 @@
+{{- if .Values.reconcile.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "payments.fullname" . }}-reconcile
+  labels:
+    {{- include "payments.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.reconcile.schedule | quote }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: reconcile
+              image: {{ include "payments.image" . }}
+              # O dia anterior é calculado pelo agendador; aqui fica fixo no rascunho.
+              args: ["reconcile", "-statement", "s3://{{ .Values.reconcile.bucket }}/settlements/$(RECONCILE_DATE).csv",
+                     "-from", "$(RECONCILE_DATE)", "-format", "json", "-fail-on-divergence"]
+              {{- include "payments.env" . | nindent 14 }}
+                - name: RECONCILE_DATE
+                  value: "2026-11-20"
+              {{- include "payments.securityContext" . | nindent 14 }}
+{{- end }}

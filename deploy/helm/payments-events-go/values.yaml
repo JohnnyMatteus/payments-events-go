@@ -1,0 +1,37 @@
+# Rascunho: valores de exemplo. Segredos vêm de um Secret existente
+# (existingSecret) com DATABASE_URL, RABBITMQ_URL e WEBHOOK_SECRETS.
+image:
+  repository: ghcr.io/johnnymatteus/payments-events-go
+  tag: ""
+  pullPolicy: IfNotPresent
+
+existingSecret: payments-events-go
+
+env:
+  LOG_LEVEL: info
+  AWS_REGION: us-east-1
+  OTEL_EXPORTER_OTLP_ENDPOINT: ""
+
+api:
+  replicas: 2
+  resources:
+    requests: {cpu: 100m, memory: 64Mi}
+    limits: {memory: 256Mi}
+
+relay:
+  replicas: 1
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 256Mi}
+
+consumer:
+  replicas: 1
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 256Mi}
+
+reconcile:
+  enabled: true
+  # Todo dia às 06:00 UTC, concilia o dia anterior.
+  schedule: "0 6 * * *"
+  bucket: pagafacil-statements
