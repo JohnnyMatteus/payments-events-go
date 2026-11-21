@@ -1,0 +1,4 @@
+transaction_id,payment_id,type,amount,currency,occurred_at
+txn_demo_001,pay_demo_001,capture,150.00,BRL,2026-11-20T12:00:00Z
+txn_demo_002,pay_demo_001,refund,30.00,BRL,2026-11-20T13:00:00Z
+txn_demo_004,pay_demo_003,capture,42.00,BRL,2026-11-20T15:00:00Z
