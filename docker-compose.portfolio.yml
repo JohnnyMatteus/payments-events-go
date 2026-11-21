@@ -1,0 +1,14 @@
+# Override opcional: conecta a API à rede compartilhada do ecossistema
+# (portfolio-net), para que o gateway do platform-edge a alcance como
+# payments-api:8080. Crie a rede com `make network` e suba com
+# `make up-portfolio`.
+services:
+  api:
+    networks:
+      payments-net: {}
+      portfolio-net:
+        aliases: [payments-api]
+
+networks:
+  portfolio-net:
+    external: true
