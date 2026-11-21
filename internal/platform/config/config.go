@@ -32,6 +32,10 @@ type Config struct {
 	ConsumerRetryBase   time.Duration
 	ConsumerRetryMax    time.Duration
 	ConsumerDeliveryMax int
+
+	S3Endpoint     string
+	AWSRegion      string
+	S3UsePathStyle bool
 }
 
 // Load lê as variáveis com valores padrão seguros para desenvolvimento.
@@ -60,6 +64,10 @@ func Load(getenv func(string) string) (Config, error) {
 		ConsumerRetryBase:   p.duration("CONSUMER_RETRY_BASE", 500*time.Millisecond),
 		ConsumerRetryMax:    p.duration("CONSUMER_RETRY_MAX", 10*time.Second),
 		ConsumerDeliveryMax: p.positiveInt("CONSUMER_DELIVERY_LIMIT", 5),
+
+		S3Endpoint:     p.str("S3_ENDPOINT", ""),
+		AWSRegion:      p.str("AWS_REGION", "us-east-1"),
+		S3UsePathStyle: p.boolean("S3_USE_PATH_STYLE", false),
 	}
 	return cfg, errors.Join(p.errs...)
 }
@@ -103,6 +111,19 @@ func (p *parser) list(key string) []string {
 		}
 	}
 	return out
+}
+
+func (p *parser) boolean(key string, def bool) bool {
+	v := strings.TrimSpace(p.getenv(key))
+	if v == "" {
+		return def
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		p.errs = append(p.errs, fmt.Errorf("%s: expected true or false, got %q", key, v))
+		return def
+	}
+	return b
 }
 
 func (p *parser) duration(key string, def time.Duration) time.Duration {

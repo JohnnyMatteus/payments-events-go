@@ -33,7 +33,7 @@ func TestVerifyRejections(t *testing.T) {
 	secret := []byte("whsec_test")
 	body := []byte(`{"id":"evt_1","amount":100}`)
 	valid := Sign(secret, sigNow, body)
-	ts := valid[:strings.Index(valid, ",")]
+	ts, _, _ := strings.Cut(valid, ",")
 
 	tests := []struct {
 		name   string

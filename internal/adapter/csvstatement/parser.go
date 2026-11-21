@@ -2,6 +2,7 @@
 package csvstatement
 
 import (
+	"context"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -105,4 +106,28 @@ func parseRecord(record []string, index map[string]int) (domain.StatementLine, e
 	}
 	line.OccurredAt = occurredAt.UTC()
 	return line, nil
+}
+
+// Opener abre o arquivo bruto do extrato a partir de uma referência.
+type Opener interface {
+	Open(ctx context.Context, ref string) (io.ReadCloser, error)
+}
+
+// Reader implementa app.StatementReader: busca o arquivo pelo Opener (S3,
+// disco) e interpreta o CSV.
+type Reader struct {
+	opener Opener
+}
+
+// NewReader cria o leitor de extratos CSV.
+func NewReader(opener Opener) *Reader { return &Reader{opener: opener} }
+
+// ReadStatement abre e interpreta o extrato.
+func (r *Reader) ReadStatement(ctx context.Context, ref string) ([]domain.StatementLine, error) {
+	rc, err := r.opener.Open(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	return Parse(rc)
 }

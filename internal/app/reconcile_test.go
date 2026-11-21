@@ -20,6 +20,17 @@ func (f *fakeLedger) EntriesBetween(_ context.Context, from, to time.Time) ([]do
 	return f.entries, f.err
 }
 
+type fakeStatements struct {
+	lines []domain.StatementLine
+	err   error
+	ref   string
+}
+
+func (f *fakeStatements) ReadStatement(_ context.Context, ref string) ([]domain.StatementLine, error) {
+	f.ref = ref
+	return f.lines, f.err
+}
+
 func TestReconcileServiceQueriesPeriodAndBuildsReport(t *testing.T) {
 	t.Parallel()
 	period := domain.Period{From: time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC)}
@@ -29,9 +40,13 @@ func TestReconcileServiceQueriesPeriodAndBuildsReport(t *testing.T) {
 		OccurredAt: period.From.Add(time.Hour),
 	}}}
 
-	report, err := NewReconcileService(ledger).Reconcile(context.Background(), period, nil)
+	statements := &fakeStatements{}
+	report, err := NewReconcileService(statements, ledger).Reconcile(context.Background(), period, "s3://b/k.csv")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if statements.ref != "s3://b/k.csv" {
+		t.Fatalf("statement ref = %q", statements.ref)
 	}
 	if !ledger.from.Equal(period.From) || !ledger.to.Equal(period.To) {
 		t.Fatalf("queried [%s, %s)", ledger.from, ledger.to)
@@ -44,13 +59,19 @@ func TestReconcileServiceQueriesPeriodAndBuildsReport(t *testing.T) {
 func TestReconcileServiceErrors(t *testing.T) {
 	t.Parallel()
 	day := time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC)
-	svc := NewReconcileService(&fakeLedger{})
-	if _, err := svc.Reconcile(context.Background(), domain.Period{From: day, To: day}, nil); err == nil {
+	valid := domain.Period{From: day, To: day.Add(time.Hour)}
+	svc := NewReconcileService(&fakeStatements{}, &fakeLedger{})
+	if _, err := svc.Reconcile(context.Background(), domain.Period{From: day, To: day}, "x"); err == nil {
 		t.Fatal("empty period must fail")
 	}
+	notFound := errors.New("no such key")
+	svc = NewReconcileService(&fakeStatements{err: notFound}, &fakeLedger{})
+	if _, err := svc.Reconcile(context.Background(), valid, "x"); !errors.Is(err, notFound) {
+		t.Fatalf("err = %v", err)
+	}
 	dbDown := errors.New("db down")
-	svc = NewReconcileService(&fakeLedger{err: dbDown})
-	if _, err := svc.Reconcile(context.Background(), domain.Period{From: day, To: day.Add(time.Hour)}, nil); !errors.Is(err, dbDown) {
+	svc = NewReconcileService(&fakeStatements{}, &fakeLedger{err: dbDown})
+	if _, err := svc.Reconcile(context.Background(), valid, "x"); !errors.Is(err, dbDown) {
 		t.Fatalf("err = %v", err)
 	}
 }

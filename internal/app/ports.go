@@ -93,6 +93,13 @@ type LedgerReader interface {
 	EntriesBetween(ctx context.Context, from, to time.Time) ([]domain.LedgerEntry, error)
 }
 
+// StatementReader lê o extrato de liquidação do provedor. ref identifica o
+// arquivo (ex.: s3://bucket/chave ou um caminho local); o adaptador decide
+// onde buscar e como interpretar o formato.
+type StatementReader interface {
+	ReadStatement(ctx context.Context, ref string) ([]domain.StatementLine, error)
+}
+
 // ProjectionRepository aplica uma mensagem à projeção de saldos no máximo
 // uma vez por consumidor. Retorna false quando a mensagem já foi aplicada.
 type ProjectionRepository interface {

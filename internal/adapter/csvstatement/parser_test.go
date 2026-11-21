@@ -1,7 +1,9 @@
 package csvstatement_test
 
 import (
+	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -74,5 +76,29 @@ func TestParseErrors(t *testing.T) {
 				t.Fatalf("err = %q, want it to contain %q", err, tt.wantMsg)
 			}
 		})
+	}
+}
+
+type mapOpener map[string]string
+
+func (m mapOpener) Open(_ context.Context, ref string) (io.ReadCloser, error) {
+	s, ok := m[ref]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	return io.NopCloser(strings.NewReader(s)), nil
+}
+
+func TestReaderOpensAndParses(t *testing.T) {
+	t.Parallel()
+	r := csvstatement.NewReader(mapOpener{
+		"s3://b/ok.csv": "transaction_id,payment_id,type,amount,currency,occurred_at\nt,p,capture,1.00,BRL,2026-11-20T00:00:00Z\n",
+	})
+	lines, err := r.ReadStatement(context.Background(), "s3://b/ok.csv")
+	if err != nil || len(lines) != 1 {
+		t.Fatalf("lines=%v err=%v", lines, err)
+	}
+	if _, err := r.ReadStatement(context.Background(), "s3://b/missing.csv"); err == nil {
+		t.Fatal("missing file must fail")
 	}
 }
