@@ -29,7 +29,6 @@ import (
 // version é preenchida no build com -ldflags "-X main.version=...".
 var version = "dev"
 
-// Códigos de saída.
 const (
 	exitOK         = 0
 	exitError      = 1
