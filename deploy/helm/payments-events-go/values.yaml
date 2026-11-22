@@ -68,6 +68,21 @@ consumer:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {memory: 256Mi}
 
+# Painel Razão (web/). A imagem não é publicada por nenhum workflow deste repositório: construa
+# web/Dockerfile e aponte o repositório. Desligado por padrão.
+web:
+  enabled: false
+  image:
+    repository: ghcr.io/johnnymatteus/payments-events-web
+    tag: ""
+  replicas: 1
+  apiUpstream: ""        # host:porta da API; vazio usa o Service do chart (<release>-api:80)
+  oidcAuthority: ""      # o emissor como o navegador o enxerga; vazio usa oidc.issuerUrl
+  oidcClientId: ""       # client público com PKCE (ADR 0013); vazio deixa o painel no token de dev
+  resources:
+    requests: {cpu: 20m, memory: 32Mi}
+    limits: {memory: 128Mi}
+
 watcher:
   enabled: true
   replicas: 1

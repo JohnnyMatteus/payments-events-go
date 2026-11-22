@@ -29,8 +29,8 @@ GitOps com ArgoCD. Neste repositório todo `feat/*` com CI verde é promovido so
 - Nada foi aplicado em cluster: o CI só renderiza o chart (lint, `template` em combinações de valores, YAML válido,
   presença de HPA, PDB, probes, CronJobs e a regra do hook). Renderizar não prova que o cluster aceita os recursos nem
   que os probes passam com a configuração real.
-- O painel (`web/`) não está no chart: o proxy do `nginx.conf` aponta para o host `api`, que no cluster é
-  `<release>-api`.
+- O painel (`web/`) está no chart como opcional (`web.enabled`, desligado por padrão): o `nginx` do painel lê o host da
+  API de `API_UPSTREAM`, o Service do chart é o padrão. Nenhum workflow publica a imagem do painel.
 - Com `secrets.provider=vault` e `databasePasswordRef`, o hook de migração precisa de uma ServiceAccount pré-existente
   com papel no Vault (`migrate.serviceAccountName`); o chart falha a renderização se faltar.
 - Ingress, certificados, o Secret TLS do gRPC e a política de promoção (quem cria a tag) ficam com o autor.

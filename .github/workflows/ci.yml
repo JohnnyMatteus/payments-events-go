@@ -183,6 +183,8 @@ jobs:
           for probe in startupProbe livenessProbe readinessProbe; do
             [ "$(grep -c "$probe:" "$RUNNER_TEMP/rendered.yaml")" -ge 4 ] || { echo "$probe ausente em algum Deployment"; exit 1; }
           done
+          grep -q 'name: API_UPSTREAM' "$RUNNER_TEMP/rendered.yaml" || { echo "o painel não foi renderizado com web.enabled"; exit 1; }
+          if grep -q 'component: web' "$RUNNER_TEMP/minimal.yaml"; then echo "painel renderizado com web.enabled desligado"; exit 1; fi
           grep -q -- 'reconcile", "-daily"' "$RUNNER_TEMP/rendered.yaml" || { echo "CronJob de conciliação sem -daily"; exit 1; }
           # O hook de migração não pode depender de recurso comum do chart (ServiceAccount): ele roda antes de existirem.
           ruby -ryaml -e '
