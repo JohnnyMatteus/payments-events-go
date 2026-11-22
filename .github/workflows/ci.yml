@@ -75,7 +75,24 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
       - name: go test -tags integration
-        run: go test -tags integration -count=1 -p 1 -timeout 15m ./...
+        run: |
+          set -o pipefail
+          go test -tags integration -count=1 -p 1 -timeout 15m ./... 2>&1 | tee "$RUNNER_TEMP/integration.log"
+      - name: Anotações da falha de integração
+        if: failure()
+        run: |
+          log="$RUNNER_TEMP/integration.log"
+          [ -f "$log" ] || exit 0
+          annotate() {
+            local msg
+            msg="$(head -c 3500)"
+            [ -n "$msg" ] || return 0
+            msg="$(printf '%s' "$msg" | sed -e 's/%/%25/g' -e 's/\r/%0D/g' | awk 'BEGIN{ORS="%0A"} {print}')"
+            echo "::error title=integration::$1 $msg"
+          }
+          grep -nE '^(--- FAIL|FAIL|panic|=== RUN.*FAIL)|setup failed|_test\.go:[0-9]+|Error|timed out' "$log" | head -n 40 | annotate "[falhas]"
+          grep -nE '^(ok|FAIL|\?)[[:space:]]' "$log" | head -n 20 | annotate "[pacotes]"
+          tail -n 25 "$log" | annotate "[fim da saída]"
 
   build:
     name: Build e imagem
