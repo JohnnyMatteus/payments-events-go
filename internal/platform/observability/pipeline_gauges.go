@@ -21,8 +21,9 @@ type PipelineSnapshot struct {
 }
 
 // RegisterPipelineGauges publica o snapshot como gauges, lidos a cada coleta
-// do Prometheus. Se a leitura falhar, nada é publicado nessa coleta (o alerta
-// de ausência pega), em vez de repetir um valor velho.
+// do Prometheus. Se a leitura falhar, nada é publicado nessa coleta (a regra
+// PipelineGaugesAbsent, em deploy/prometheus/alerts.yml, pega a ausência), em
+// vez de repetir um valor velho.
 func RegisterPipelineGauges(read func(context.Context) (PipelineSnapshot, error), logger *slog.Logger) error {
 	m := otel.Meter(meterName)
 	pending, e1 := m.Int64ObservableGauge("pipeline_outbox_pending", metric.WithDescription("Mensagens pendentes no outbox."))

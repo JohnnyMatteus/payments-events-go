@@ -190,7 +190,7 @@ Só o que falta de fato. O que foi escrito e ainda não rodou contra o serviço 
 
 - OIDC contra o Keycloak real: criar no realm `edge` do platform-edge o client público `payments-razao` (PKCE, redirect `/callback`) e alinhar o `KC_HOSTNAME` para o emissor ser alcançável do contêiner da API ([ADR 0013](docs/adr/0013-oidc-pkce-e-papeis-no-caso-de-uso.md)). Também falta provar o gRPC com um token de conta de serviço real.
 - Segredos contra um Vault e um Secrets Manager reais (hoje só dublês HTTP e `docker compose config`), e configurar no Postgres as duas credenciais da rotação da senha do banco ([ADR 0014](docs/adr/0014-segredos-por-porta-e-rotacao-sem-downtime.md)).
-- Chart Helm e manifesto ArgoCD em um cluster: o CI só renderiza ([ADR 0017](docs/adr/0017-deploy-em-kubernetes-com-helm-e-argocd.md)). O painel (`web/`) ainda não está no chart.
+- Chart Helm e manifesto ArgoCD em um cluster: o CI só renderiza ([ADR 0017](docs/adr/0017-deploy-em-kubernetes-com-helm-e-argocd.md)). O painel é opcional no chart (`web.enabled`), mas nenhuma imagem dele é publicada por workflow algum.
 - Teste de carga: rodar o k6 num ambiente de teste e fixar limiares a partir da medição ([loadtest/](loadtest/README.md)); os alertas do Prometheus também são limiares iniciais.
 
 **Decisões do autor**

@@ -154,3 +154,45 @@ func BenchmarkReconcile(b *testing.B) {
 		domain.Reconcile(day, statement, ledger)
 	}
 }
+
+// O lançamento do provedor dá a identidade da transação mesmo quando o ajuste
+// vem antes dele no ledger (ordem de leitura não pode mudar o resultado).
+func TestReconcileAdjustmentBeforeProviderEntryKeepsProviderIdentity(t *testing.T) {
+	t.Parallel()
+	provider := entry("txn_a", domain.Credit, 3000, at(9))
+	adj := domain.LedgerEntry{
+		EventID: "adj_1", TransactionID: "adj_c1", AdjustsTransactionID: "txn_a", PaymentID: "pay_txn_a",
+		Direction: domain.Credit, AmountCents: 500, Currency: "BRL", OccurredAt: at(11),
+	}
+	statement := []domain.StatementLine{line(2, "txn_a", domain.Credit, 3500, at(9))}
+	for name, ledger := range map[string][]domain.LedgerEntry{
+		"ajuste antes":  {adj, provider},
+		"ajuste depois": {provider, adj},
+	} {
+		r := domain.Reconcile(day, statement, ledger)
+		if r.HasDivergences() || r.Matched != 1 || !r.Matches[0].Adjusted {
+			t.Fatalf("%s: report = %+v", name, r)
+		}
+		if got := r.Matches[0].Ledger; got.EventID != "evt_txn_a" || !got.OccurredAt.Equal(at(9)) || got.AmountCents != 3500 {
+			t.Errorf("%s: o lançamento efetivo deve ter a identidade do provedor e o líquido 3500: %+v", name, got)
+		}
+	}
+}
+
+// Ajuste que zera a transação: o efetivo tem valor 0 e, se o extrato ainda a
+// lista, a divergência mostra o lado do ledger como crédito de 0, não débito.
+func TestReconcileZeroNetEntryKeepsCreditDirection(t *testing.T) {
+	t.Parallel()
+	ledger := []domain.LedgerEntry{
+		entry("txn_z", domain.Credit, 1000, at(9)),
+		{EventID: "adj_z", TransactionID: "adj_cz", AdjustsTransactionID: "txn_z", PaymentID: "pay_txn_z",
+			Direction: domain.Debit, AmountCents: 1000, Currency: "BRL", OccurredAt: at(10)},
+	}
+	r := domain.Reconcile(day, []domain.StatementLine{line(2, "txn_z", domain.Credit, 1000, at(9))}, ledger)
+	if len(r.Divergences) != 1 || r.Divergences[0].Kind != domain.AmountMismatch {
+		t.Fatalf("divergences = %+v", r.Divergences)
+	}
+	if got := r.Divergences[0].Ledger; got.AmountCents != 0 || got.Direction != domain.Credit {
+		t.Fatalf("ledger efetivo = %+v, want crédito de 0", got)
+	}
+}

@@ -63,7 +63,7 @@ rabbitmq_queue_messages{queue="balance-projector.dlq"}
 
 `deploy/prometheus/alerts.yml` traz os sinais sugeridos no design doc: mensagem morta no outbox, p99 do atraso de
 publicação acima de 30 s, assinatura inválida em excesso, webhook com erro 5xx, mensagens paradas na DLQ do broker,
-dead letters abertas, divergências da conciliação sem decisão e conciliação parada há mais de 36 h. O Prometheus do
+dead letters abertas, divergências da conciliação sem decisão, conciliação parada há mais de 36 h e a ausência dos gauges do pipeline. O Prometheus do
 compose carrega o arquivo; o CI roda `promtool check` e `promtool test rules` (`alerts_test.yml`, um caso que dispara e um
 que não dispara por regra). Os limiares são pontos de partida, não medidos.
 
@@ -75,7 +75,8 @@ que não dispara por regra). Os limiares são pontos de partida, não medidos.
   "há dead letters para tratar" é `pipeline_dead_letters_open`.
 - O relay publica gauges de estado lidos do banco (`pipeline_outbox_pending`, `pipeline_outbox_dead`,
   `pipeline_dead_letters_open`, `pipeline_oldest_pending_seconds`, `reconciliation_open_cases`,
-  `reconciliation_last_run_timestamp_seconds`). Se a leitura falhar, a coleta não publica valor velho.
+  `reconciliation_last_run_timestamp_seconds`). Se a leitura falhar, a coleta não publica valor velho. Com o banco fora o gauge some e a regra `PipelineGaugesAbsent` (`absent()` por 10 min) avisa; sem ela os
+  alertas de dead letters e de conciliação ficariam mudos.
 
 ## Traces
 

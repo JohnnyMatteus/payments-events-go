@@ -3,6 +3,9 @@ oidc:
   issuerUrl: https://idp.example.com/realms/edge
 config:
   statementsQueueUrl: https://sqs.us-east-1.amazonaws.com/000000000000/pagafacil-statements-events
+web:
+  enabled: true
+  oidcClientId: payments-razao
 grpc:
   enabled: true
   tlsSecret: payments-grpc-tls

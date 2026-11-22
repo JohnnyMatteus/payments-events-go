@@ -87,8 +87,10 @@ func (r *EventRecorder) Record(ctx context.Context, rec app.Recording) (outcome 
 
 func record(ctx context.Context, tx pgx.Tx, rec app.Recording, payload []byte) (app.IngestOutcome, error) {
 	// O id do ledger é sorteado no INSERT, mas o commit pode sair de ordem. O lock
-	// compartilhado vai antes de tudo (nenhum lock de linha ainda) e fica até o
-	// commit, para a leitura por cursor saber quando um id é definitivo (ADR 0019).
+	// compartilhado vai antes do sorteio e fica até o commit, para a leitura por
+	// cursor saber quando um id é definitivo (ADR 0019). Aqui (webhook) nenhum lock de
+	// linha foi pego antes; a aprovação de ajuste o pega no início da própria transação,
+	// antes do FOR UPDATE do ajuste (pegar de novo na mesma transação não custa nada).
 	if rec.Entry != nil {
 		if err := lockLedgerAppend(ctx, tx); err != nil {
 			return "", err

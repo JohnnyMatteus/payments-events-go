@@ -278,7 +278,7 @@ ou decisão do autor está dito na linha.
 | # | Item | Estado |
 | --- | --- | --- |
 | 0 | Validação da fundação | Feito: o CI roda lint, unitários, painel, integração (testcontainers), build, `docker build`, `govulncheck` e `docker compose config`. |
-| 1 | Kubernetes e Helm | Feito no chart ([ADR 0017](adr/0017-deploy-em-kubernetes-com-helm-e-argocd.md)): Deployments, CronJobs de conciliação e retenção, probes, HPA, PodDisruptionBudget, hook de migração e ArgoCD com sincronização manual. O CI só renderiza; nada foi aplicado em cluster. |
+| 1 | Kubernetes e Helm | Feito no chart ([ADR 0017](adr/0017-deploy-em-kubernetes-com-helm-e-argocd.md)): Deployments, CronJobs de conciliação e retenção, probes, HPA, PodDisruptionBudget, hook de migração e ArgoCD com sincronização manual. O CI só renderiza; nada foi aplicado em cluster. O painel é opcional no chart. |
 | 2 | Segredos | Feito com dublês ([ADR 0014](adr/0014-segredos-por-porta-e-rotacao-sem-downtime.md)): Vault e Secrets Manager (LocalStack). Falta provar contra os serviços reais. |
 | 3 | Chegada do extrato | Feito ([ADR 0012](adr/0012-disparo-automatico-da-conciliacao.md)). |
 | 4 | Outbox | Limpeza de mensagens publicadas feita ([ADR 0015](adr/0015-retencao-sem-perder-idempotencia-nem-razao.md)). `LISTEN/NOTIFY` e CDC não foram feitos. |
