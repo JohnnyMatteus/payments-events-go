@@ -99,6 +99,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          # O token do checkout não deve ficar em disco para os passos seguintes (scanners de terceiros rodam aqui).
+          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -109,26 +112,37 @@ jobs:
       - name: docker build
         run: docker build --build-arg VERSION=${{ github.sha }} -t payments-events-go:ci .
       - name: Exportar a imagem (entrada do SBOM e do scan)
-        run: docker save payments-events-go:ci -o "$RUNNER_TEMP/image.tar"
+        run: |
+          set -euo pipefail
+          # Diretórios só para isto: nunca monte o RUNNER_TEMP inteiro em imagem de terceiros (ele guarda os arquivos
+          # de comando do runner, como GITHUB_ENV e GITHUB_PATH, e credenciais de passos anteriores).
+          mkdir -p "$RUNNER_TEMP/scan/in" "$RUNNER_TEMP/scan/sbom"
+          docker save payments-events-go:ci -o "$RUNNER_TEMP/scan/in/image.tar"
       - name: SBOM (syft, SPDX e CycloneDX)
         run: |
           set -euo pipefail
-          docker run --rm -v "$RUNNER_TEMP:/work" anchore/syft:v1.57.2 scan docker-archive:/work/image.tar \
-            -o spdx-json=/work/sbom.spdx.json -o cyclonedx-json=/work/sbom.cdx.json
+          # Imagem fixada por digest do índice multi-arquitetura (ADR 0018). A imagem entra somente leitura; a saída vai
+          # para um diretório separado.
+          docker run --rm --security-opt no-new-privileges \
+            -v "$RUNNER_TEMP/scan/in:/in:ro" -v "$RUNNER_TEMP/scan/sbom:/out" \
+            anchore/syft:v1.57.2@sha256:e97e20b6e6d1699c60296b66ab337941724f9bd06ac279d893eda89601fc4b2a \
+            scan docker-archive:/in/image.tar -o spdx-json=/out/sbom.spdx.json -o cyclonedx-json=/out/sbom.cdx.json
           # Um SBOM vazio passaria despercebido: o binário Go tem de listar as dependências do módulo.
           for f in sbom.spdx.json sbom.cdx.json; do
-            grep -q 'jackc/pgx' "$RUNNER_TEMP/$f" || { echo "$f não lista github.com/jackc/pgx"; exit 1; }
+            grep -q 'jackc/pgx' "$RUNNER_TEMP/scan/sbom/$f" || { echo "$f não lista github.com/jackc/pgx"; exit 1; }
           done
       - uses: actions/upload-artifact@v6
         with:
           name: sbom
           path: |
-            ${{ runner.temp }}/sbom.spdx.json
-            ${{ runner.temp }}/sbom.cdx.json
+            ${{ runner.temp }}/scan/sbom/sbom.spdx.json
+            ${{ runner.temp }}/scan/sbom/sbom.cdx.json
       - name: Trivy (vulnerabilidades HIGH e CRITICAL com correção disponível)
         run: |
-          docker run --rm -v "$RUNNER_TEMP:/work" aquasec/trivy:0.76.2 image --input /work/image.tar \
-            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress
+          # Só leitura sobre a imagem exportada; o Trivy não escreve em nenhum diretório do runner (só no cache do contêiner).
+          docker run --rm --security-opt no-new-privileges -v "$RUNNER_TEMP/scan/in:/in:ro" \
+            aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb \
+            image --input /in/image.tar --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress
       - name: docker compose config
         run: docker compose --profile core --profile observability --profile tools config --quiet
       - name: helm lint e template

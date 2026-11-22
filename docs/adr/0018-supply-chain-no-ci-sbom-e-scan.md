@@ -15,8 +15,20 @@ código Go. A restrição é não criar segredo novo e não alterar as permissõ
     vazio passaria sem ser notado) e publica os dois como artefato do job;
   - roda o **Trivy** sobre o mesmo arquivo, reprovando o job por vulnerabilidades HIGH ou CRITICAL **com correção
     disponível** (`--ignore-unfixed`).
-- As ferramentas rodam como imagens Docker com versão fixada (`anchore/syft:v1.57.2`, `aquasec/trivy:0.76.2`), em vez
-  de actions de terceiros, para não aceitar código mutável de tag num job que lê o repositório. Nenhum segredo é usado.
+- As ferramentas rodam como imagens Docker fixadas por **digest do índice multi-arquitetura**
+  (`anchore/syft:v1.57.2@sha256:e97e20b6...` e `aquasec/trivy:0.76.2@sha256:8f6bb947...`, completos no `ci.yml`), em
+  vez de actions de terceiros: tag é mutável e imagem de scanner já foi vetor de ataque. Os digests vieram da API do
+  registro (Docker Hub, `HEAD /v2/<repo>/manifests/<tag>` com `Accept` de índice OCI, cabeçalho `Docker-Content-Digest`),
+  sem `docker pull`, em 2026-11-22. Atualizar é repetir essa consulta e trocar tag e digest juntos.
+- **Versão do Trivy**: o aviso oficial GHSA-69fq-xp46-6x23 ("Trivy ecosystem supply chain temporarily compromised")
+  lista como comprometidos o binário e a imagem v0.69.4, as imagens v0.69.5 e v0.69.6 do Docker Hub, as tags de
+  `trivy-action` anteriores à 0.35.0 e `setup-trivy`. A 0.76.2 é posterior a essa janela (19 a 23 de março de 2026) e não
+  consta no aviso; o digest fixado impede que a tag seja trocada depois.
+- **Isolamento no runner**: a imagem exportada fica em `$RUNNER_TEMP/scan/in`, montada somente leitura nas duas
+  ferramentas; o SBOM sai por um diretório separado, só com o syft. Nunca se monta o `RUNNER_TEMP` inteiro (ele guarda
+  os arquivos de comando do runner, onde escrever `GITHUB_ENV` ou `GITHUB_PATH` vira execução nos passos seguintes,
+  e credenciais de passos anteriores). O Trivy não escreve em nada do runner, e não há `docker.sock`. O checkout do job
+  usa `persist-credentials: false`.
 
 ## Consequências
 
