@@ -41,6 +41,14 @@ type Config struct {
 	StatementsQueueURL string
 	OperatorTokens     []string
 
+	// AppEnv é "dev" ou "production". Em produção o token estático de
+	// operador é recusado e só o OIDC autentica (ADR 0013).
+	AppEnv           string
+	OIDCIssuerURL    string
+	OIDCAudience     string
+	OIDCRoleReader   string
+	OIDCRoleOperator string
+
 	RedisURL            string
 	IdempotencyClaimTTL time.Duration
 	IdempotencyDoneTTL  time.Duration
@@ -83,11 +91,20 @@ func Load(getenv func(string) string) (Config, error) {
 		StatementsQueueURL: p.str("STATEMENTS_QUEUE_URL", ""),
 		OperatorTokens:     p.list("OPERATOR_TOKENS"),
 
+		AppEnv:           p.str("APP_ENV", "dev"),
+		OIDCIssuerURL:    p.str("OIDC_ISSUER_URL", ""),
+		OIDCAudience:     p.str("OIDC_AUDIENCE", "edge-gateway"),
+		OIDCRoleReader:   p.str("OIDC_ROLE_READER", "payments.read"),
+		OIDCRoleOperator: p.str("OIDC_ROLE_OPERATOR", "payments.write"),
+
 		RedisURL:            p.str("REDIS_URL", ""),
 		IdempotencyClaimTTL: p.duration("IDEMPOTENCY_CLAIM_TTL", 30*time.Second),
 		IdempotencyDoneTTL:  p.duration("IDEMPOTENCY_DONE_TTL", 24*time.Hour),
 		WebhookRateLimit:    p.positiveInt("WEBHOOK_RATE_LIMIT", 600),
 		WebhookRateWindow:   p.duration("WEBHOOK_RATE_WINDOW", time.Minute),
+	}
+	if cfg.AppEnv != "dev" && cfg.AppEnv != "production" {
+		p.errs = append(p.errs, fmt.Errorf("APP_ENV: expected dev or production, got %q", cfg.AppEnv))
 	}
 	return cfg, errors.Join(p.errs...)
 }

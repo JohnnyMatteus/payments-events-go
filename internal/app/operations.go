@@ -40,6 +40,9 @@ func NewStatementService(store StatementStore, parse StatementParser) *Statement
 // não passa na leitura nunca chega ao bucket: conciliar um arquivo parcial
 // esconderia divergências.
 func (s *StatementService) Upload(ctx context.Context, date time.Time, body []byte) (StatementObject, int, error) {
+	if _, err := Authorize(ctx, RoleOperator); err != nil {
+		return StatementObject{}, 0, err
+	}
 	lines, err := s.parse(bytes.NewReader(body))
 	if err != nil {
 		return StatementObject{}, 0, fmt.Errorf("%w: %w", ErrInvalidInput, err)
@@ -65,21 +68,29 @@ func NewDeadLetterService(repo DeadLetterRepository) *DeadLetterService {
 
 // Reprocess devolve a mensagem ao fluxo pelo outbox. O motivo é obrigatório
 // porque reprocessar mexe com saldo.
-func (s *DeadLetterService) Reprocess(ctx context.Context, source DeadLetterSource, id int64, operator, note string) error {
-	note, err := domain.RequireReason(note)
+func (s *DeadLetterService) Reprocess(ctx context.Context, source DeadLetterSource, id int64, note string) error {
+	actor, err := Authorize(ctx, RoleOperator)
 	if err != nil {
 		return err
 	}
-	return s.repo.Requeue(ctx, source, id, operator, note)
+	note, err = domain.RequireReason(note)
+	if err != nil {
+		return err
+	}
+	return s.repo.Requeue(ctx, source, id, actor.Name, note)
 }
 
 // Discard encerra a mensagem sem reprocessar, com motivo.
-func (s *DeadLetterService) Discard(ctx context.Context, source DeadLetterSource, id int64, operator, note string) error {
-	note, err := domain.RequireReason(note)
+func (s *DeadLetterService) Discard(ctx context.Context, source DeadLetterSource, id int64, note string) error {
+	actor, err := Authorize(ctx, RoleOperator)
 	if err != nil {
 		return err
 	}
-	return s.repo.Discard(ctx, source, id, operator, note)
+	note, err = domain.RequireReason(note)
+	if err != nil {
+		return err
+	}
+	return s.repo.Discard(ctx, source, id, actor.Name, note)
 }
 
 // DeadLetterArchiver é o consumidor da DLQ do broker: registra cada mensagem
@@ -134,7 +145,17 @@ func NewReconciliationRunner(statements StatementStore, reconcile *ReconcileServ
 
 // Run concilia o extrato do dia date (UTC) com o ledger. Uma falha de leitura
 // do extrato também é gravada, para a tela mostrar o status do job.
+//
+// Pedido manual exige um operador autenticado, e o nome gravado é o dele;
+// os gatilhos do sistema (notificação do S3, cron) não passam por pessoa.
 func (r *ReconciliationRunner) Run(ctx context.Context, date time.Time, trigger RunTrigger, operator string) (RunSummary, error) {
+	if trigger == TriggerManual {
+		actor, err := Authorize(ctx, RoleOperator)
+		if err != nil {
+			return RunSummary{}, err
+		}
+		operator = actor.Name
+	}
 	date = time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
 	obj, err := r.statements.Stat(ctx, date)
 	if err != nil {
@@ -195,18 +216,26 @@ func NewCaseService(repo CaseRepository) *CaseService {
 }
 
 // Explain encerra o caso com uma justificativa, sem alterar o ledger.
-func (s *CaseService) Explain(ctx context.Context, id int64, operator, reason string) error {
-	reason, err := domain.RequireReason(reason)
+func (s *CaseService) Explain(ctx context.Context, id int64, reason string) error {
+	actor, err := Authorize(ctx, RoleOperator)
 	if err != nil {
 		return err
 	}
-	return s.repo.Explain(ctx, id, func(c Case) error { return domain.CanExplain(c.Status) }, operator, reason)
+	reason, err = domain.RequireReason(reason)
+	if err != nil {
+		return err
+	}
+	return s.repo.Explain(ctx, id, func(c Case) error { return domain.CanExplain(c.Status) }, actor.Name, reason)
 }
 
 // ProposeAdjustment registra o lançamento que fecharia a divergência. Ele só
 // entra no ledger quando outra pessoa aprovar.
-func (s *CaseService) ProposeAdjustment(ctx context.Context, caseID int64, operator, reason string) (Adjustment, error) {
-	reason, err := domain.RequireReason(reason)
+func (s *CaseService) ProposeAdjustment(ctx context.Context, caseID int64, reason string) (Adjustment, error) {
+	actor, err := Authorize(ctx, RoleOperator)
+	if err != nil {
+		return Adjustment{}, err
+	}
+	reason, err = domain.RequireReason(reason)
 	if err != nil {
 		return Adjustment{}, err
 	}
@@ -215,23 +244,33 @@ func (s *CaseService) ProposeAdjustment(ctx context.Context, caseID int64, opera
 			return domain.LedgerEntry{}, err
 		}
 		return domain.AdjustmentFor(c.Divergence, "c"+strconv.FormatInt(c.ID, 10))
-	}, operator, reason)
+	}, actor, reason)
 }
 
 // ApproveAdjustment aplica a regra dos quatro olhos e grava o ajuste no
 // ledger e no outbox, na mesma transação que encerra o caso.
-func (s *CaseService) ApproveAdjustment(ctx context.Context, id int64, operator, note string) (Adjustment, error) {
+func (s *CaseService) ApproveAdjustment(ctx context.Context, id int64, note string) (Adjustment, error) {
+	actor, err := Authorize(ctx, RoleOperator)
+	if err != nil {
+		return Adjustment{}, err
+	}
 	return s.repo.ApproveAdjustment(ctx, id, func(a Adjustment) (Recording, error) {
-		if err := domain.CanApprove(a.Status, a.ProposedBy, operator); err != nil {
+		err := domain.CanApprove(a.Status, domain.Identity{ID: a.ProposedByID, Name: a.ProposedBy},
+			domain.Identity{ID: actor.ID, Name: actor.Name})
+		if err != nil {
 			return Recording{}, err
 		}
-		return adjustmentRecording(a, operator)
-	}, operator, strings.TrimSpace(note))
+		return adjustmentRecording(a, actor.Name)
+	}, actor, strings.TrimSpace(note))
 }
 
 // RejectAdjustment recusa o ajuste e devolve o caso para aberto.
-func (s *CaseService) RejectAdjustment(ctx context.Context, id int64, operator, note string) (Adjustment, error) {
-	note, err := domain.RequireReason(note)
+func (s *CaseService) RejectAdjustment(ctx context.Context, id int64, note string) (Adjustment, error) {
+	actor, err := Authorize(ctx, RoleOperator)
+	if err != nil {
+		return Adjustment{}, err
+	}
+	note, err = domain.RequireReason(note)
 	if err != nil {
 		return Adjustment{}, err
 	}
@@ -240,7 +279,7 @@ func (s *CaseService) RejectAdjustment(ctx context.Context, id int64, operator, 
 			return fmt.Errorf("%w: status %s", domain.ErrAdjustmentClosed, a.Status)
 		}
 		return nil
-	}, operator, note)
+	}, actor, note)
 }
 
 func adjustmentRecording(a Adjustment, approver string) (Recording, error) {

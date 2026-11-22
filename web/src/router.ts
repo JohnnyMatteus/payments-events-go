@@ -6,6 +6,7 @@ export const router = createRouter({
   routes: [
     { path: '/', redirect: '/conciliacao' },
     { path: '/entrar', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { public: true } },
+    { path: '/callback', name: 'callback', component: () => import('@/views/CallbackView.vue'), meta: { public: true } },
     { path: '/conciliacao', name: 'reconciliation', component: () => import('@/views/ReconciliationView.vue') },
     { path: '/eventos', name: 'events', component: () => import('@/views/EventsView.vue') },
     { path: '/eventos/:id', name: 'event', component: () => import('@/views/EventView.vue'), props: true },

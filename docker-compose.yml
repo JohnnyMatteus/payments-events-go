@@ -130,8 +130,15 @@ services:
       HTTP_ADDR: ":8080"
       OTEL_SERVICE_NAME: payments-api
       REDIS_URL: redis://redis:6379/0
-      # Tokens (operador:papel:token) só para o ambiente local; ver ADR 0011.
-      OPERATOR_TOKENS: ${OPERATOR_TOKENS:-ana:operador:dev-token-ana,bruno:operador:dev-token-bruno,carla:leitor:dev-token-carla}
+      # Tokens (operador:papel:token) só para o ambiente local; ver ADR 0011. O traço
+      # (sem dois-pontos) deixa OPERATOR_TOKENS= vazio desligar os tokens; para
+      # entrar por OIDC use `make up-oidc` (docker-compose.oidc.yml).
+      APP_ENV: ${APP_ENV:-dev}
+      OPERATOR_TOKENS: ${OPERATOR_TOKENS-ana:operador:dev-token-ana,bruno:operador:dev-token-bruno,carla:leitor:dev-token-carla}
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-edge-gateway}
+      OIDC_ROLE_READER: ${OIDC_ROLE_READER:-payments.read}
+      OIDC_ROLE_OPERATOR: ${OIDC_ROLE_OPERATOR:-payments.write}
       # Baixo de propósito no ambiente local, para o limite ser visível na demo.
       WEBHOOK_RATE_LIMIT: ${WEBHOOK_RATE_LIMIT:-20}
       WEBHOOK_RATE_WINDOW: ${WEBHOOK_RATE_WINDOW:-1m}
@@ -225,6 +232,9 @@ services:
     image: payments-events-web:${APP_VERSION:-dev}
     profiles: [core]
     ports: ["${WEB_PORT:-8086}:8080"]
+    environment:
+      OIDC_AUTHORITY: ${OIDC_AUTHORITY:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
     networks: [payments-net]
     restart: unless-stopped
     depends_on:

@@ -8,34 +8,61 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/JohnnyMatteus/payments-events-go/internal/app"
 )
 
-type (
-	operatorKey struct{}
-	roleKey     struct{}
-)
+// Role é o papel do operador (ADR 0011); vive em app porque quem decide é o caso de uso.
+type Role = app.Role
 
-// Role é o papel do operador (ADR 0011).
-type Role string
-
-// Papéis: o leitor só consulta; o operador também executa ações.
+// Papéis aceitos.
 const (
-	RoleReader   Role = "leitor"
-	RoleOperator Role = "operador"
+	RoleReader   = app.RoleReader
+	RoleOperator = app.RoleOperator
 )
 
-func (r Role) valid() bool { return r == RoleReader || r == RoleOperator }
+// Erros de autenticação. O middleware os traduz em 401 e 403.
+var (
+	// ErrUnauthorized: sem credencial ou credencial inválida.
+	ErrUnauthorized = errors.New("unauthorized")
+	// ErrNoRole: credencial válida, mas sem papel mapeado para este serviço.
+	ErrNoRole = errors.New("authenticated without a known role")
+)
+
+// Authenticator identifica quem fez a requisição. Token estático (dev) e OIDC
+// o implementam; a autorização por papel não mora aqui, mora no caso de uso.
+type Authenticator interface {
+	Authenticate(r *http.Request) (app.Actor, error)
+}
 
 // OperatorFrom devolve o operador autenticado da requisição.
 func OperatorFrom(ctx context.Context) string {
-	op, _ := ctx.Value(operatorKey{}).(string)
-	return op
+	a, _ := app.ActorFrom(ctx)
+	return a.Name
 }
 
 // RoleFrom devolve o papel do operador autenticado.
 func RoleFrom(ctx context.Context) Role {
-	role, _ := ctx.Value(roleKey{}).(Role)
-	return role
+	a, _ := app.ActorFrom(ctx)
+	return a.Role
+}
+
+// Authenticated exige credencial válida e põe o ator no contexto. Não decide
+// permissão de ação: isso é do caso de uso (app.Authorize).
+func Authenticated(a Authenticator, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		actor, err := a.Authenticate(r)
+		switch {
+		case errors.Is(err, ErrNoRole):
+			writeProblem(w, http.StatusForbidden, "forbidden", "a identidade não tem papel neste serviço")
+			return
+		case err != nil:
+			w.Header().Set("WWW-Authenticate", `Bearer realm="payments-events"`)
+			writeProblem(w, http.StatusUnauthorized, "unauthorized", "informe um token válido")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(app.WithActor(r.Context(), actor)))
+	})
 }
 
 // OperatorAuth identifica operadores por token de portador. Cada token
@@ -65,7 +92,7 @@ func NewOperatorAuth(entries []string) (*OperatorAuth, error) {
 		if !ok || !ok2 || op == "" || len(token) < 8 {
 			return nil, errors.New("OPERATOR_TOKENS: use operador:papel:token com token de 8 ou mais caracteres")
 		}
-		if !Role(role).valid() {
+		if !Role(role).Valid() {
 			return nil, fmt.Errorf("OPERATOR_TOKENS: papel %q de %q inválido (use leitor ou operador)", role, op)
 		}
 		if seen[strings.ToLower(op)] {
@@ -92,35 +119,16 @@ func (a *OperatorAuth) operatorFor(token string) (operatorToken, bool) {
 	return found, found.operator != ""
 }
 
-// Middleware exige o token e coloca o operador e o papel no contexto.
-func (a *OperatorAuth) Middleware(next http.Handler) http.Handler {
-	return a.require(RoleReader, next)
-}
-
-// RequireRole exige o token e um papel mínimo; o leitor recebe 403 nas ações.
-func (a *OperatorAuth) RequireRole(min Role, next http.Handler) http.Handler {
-	return a.require(min, next)
-}
-
-func (a *OperatorAuth) require(min Role, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if !ok {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="payments-events"`)
-			writeProblem(w, http.StatusUnauthorized, "unauthorized", "informe o token do operador")
-			return
-		}
-		who, ok := a.operatorFor(token)
-		if !ok {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="payments-events", error="invalid_token"`)
-			writeProblem(w, http.StatusUnauthorized, "unauthorized", "token inválido")
-			return
-		}
-		if min == RoleOperator && who.role != RoleOperator {
-			writeProblem(w, http.StatusForbidden, "forbidden", "o papel leitor só consulta; ação exige o papel operador")
-			return
-		}
-		ctx := context.WithValue(r.Context(), operatorKey{}, who.operator)
-		next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, roleKey{}, who.role)))
-	})
+// Authenticate lê o token de portador e devolve o operador dono dele.
+func (a *OperatorAuth) Authenticate(r *http.Request) (app.Actor, error) {
+	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok {
+		return app.Actor{}, ErrUnauthorized
+	}
+	who, ok := a.operatorFor(token)
+	if !ok {
+		return app.Actor{}, ErrUnauthorized
+	}
+	// Em dev a identidade é o próprio operador do token; o prefixo evita colidir com um ID de OIDC.
+	return app.Actor{ID: "dev:" + strings.ToLower(who.operator), Name: who.operator, Role: who.role}, nil
 }

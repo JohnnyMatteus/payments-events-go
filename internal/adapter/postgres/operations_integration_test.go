@@ -60,20 +60,20 @@ func TestAdjustmentFlowClosesDivergence(t *testing.T) {
 		t.Fatalf("items = %+v, %v", items, err)
 	}
 
-	adj, err := svc.ProposeAdjustment(ctx, list[0].ID, "ana", "provedor reteve taxa")
+	adj, err := svc.ProposeAdjustment(as(ctx, "ana"), list[0].ID, "provedor reteve taxa")
 	if err != nil {
 		t.Fatalf("propose: %v", err)
 	}
-	if _, err := svc.ProposeAdjustment(ctx, list[0].ID, "ana", "de novo"); err == nil {
+	if _, err := svc.ProposeAdjustment(as(ctx, "ana"), list[0].ID, "de novo"); err == nil {
 		t.Fatal("a second proposal on the same case must be refused")
 	}
-	if _, err := svc.ApproveAdjustment(ctx, adj.ID, "ana", ""); !errors.Is(err, domain.ErrSameOperator) {
+	if _, err := svc.ApproveAdjustment(as(ctx, "ana"), adj.ID, ""); !errors.Is(err, domain.ErrSameOperator) {
 		t.Fatalf("self approval = %v", err)
 	}
 	if count(t, "ledger_entries") != 1 {
 		t.Fatal("ledger must be untouched before approval")
 	}
-	if _, err := svc.ApproveAdjustment(ctx, adj.ID, "bruno", "ok"); err != nil {
+	if _, err := svc.ApproveAdjustment(as(ctx, "bruno"), adj.ID, "ok"); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	if count(t, "ledger_entries") != 2 || count(t, "outbox_messages") != 2 {
@@ -171,4 +171,9 @@ func TestObjectClaimsAreAtomicAndReleasable(t *testing.T) {
 	if again, err := claims.Claim(ctx, "b", "settlements/2026-11-20.csv", "v1"); err != nil || !again {
 		t.Fatalf("claim after release = %v, %v", again, err)
 	}
+}
+
+// as devolve um contexto com um operador autenticado, como o middleware faz.
+func as(ctx context.Context, name string) context.Context {
+	return app.WithActor(ctx, app.Actor{ID: "dev:" + name, Name: name, Role: app.RoleOperator})
 }

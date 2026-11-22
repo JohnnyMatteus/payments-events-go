@@ -66,3 +66,18 @@ func TestRequire(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// "prod" ou "Production" não podem passar por produção e ligar o token de dev.
+func TestLoadRejectsUnknownAppEnv(t *testing.T) {
+	t.Parallel()
+	for _, v := range []string{"prod", "Production", "PRODUCTION", "staging", "producao"} {
+		if _, err := Load(env(map[string]string{"APP_ENV": v})); err == nil || !strings.Contains(err.Error(), "APP_ENV") {
+			t.Errorf("APP_ENV=%q: err = %v, want APP_ENV error", v, err)
+		}
+	}
+	for _, v := range []string{"dev", "production", ""} {
+		if _, err := Load(env(map[string]string{"APP_ENV": v})); err != nil {
+			t.Errorf("APP_ENV=%q: %v", v, err)
+		}
+	}
+}

@@ -34,7 +34,7 @@ func NewRouter(webhook http.Handler, metrics http.Handler, ready ReadinessCheck,
 type RouterOption func(*http.ServeMux)
 
 // WithAdmin liga a API de operação (/api/v1), protegida por token de operador.
-func WithAdmin(admin *AdminHandler, auth *OperatorAuth) RouterOption {
+func WithAdmin(admin *AdminHandler, auth Authenticator) RouterOption {
 	return func(mux *http.ServeMux) { admin.Register(mux, auth) }
 }
 
