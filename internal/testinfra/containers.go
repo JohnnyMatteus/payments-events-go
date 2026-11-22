@@ -159,7 +159,8 @@ func StartLocalStack(ctx context.Context) (string, func(), error) {
 func ResetDatabase(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `TRUNCATE processed_events, ledger_entries, outbox_messages,
-		consumed_messages, payment_balances RESTART IDENTITY CASCADE`)
+		consumed_messages, payment_balances, dead_letters, reconciliation_runs, reconciliation_items,
+		divergence_cases, ledger_adjustments RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("reset database: %v", err)
 	}

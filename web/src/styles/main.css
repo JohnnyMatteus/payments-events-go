@@ -1,0 +1,158 @@
+@import '@fontsource/source-sans-3/400.css';
+@import '@fontsource/source-sans-3/600.css';
+@import '@fontsource/source-serif-4/600.css';
+@import '@fontsource/source-code-pro/400.css';
+@import '@fontsource/source-code-pro/500.css';
+
+:root {
+  --font-ui: 'Source Sans 3', system-ui, sans-serif;
+  --font-serif: 'Source Serif 4', Georgia, serif;
+  --font-mono: 'Source Code Pro', ui-monospace, monospace;
+  --rule: rgba(var(--v-border-color), var(--v-border-opacity));
+  --row: 32px;
+  --gutter: 56px;
+}
+
+html {
+  font-family: var(--font-ui);
+}
+body,
+.v-application {
+  font-family: var(--font-ui) !important;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+h1,
+h2,
+.serif {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: 0;
+}
+h1 {
+  font-size: 26px;
+  line-height: 32px;
+}
+h2 {
+  font-size: 20px;
+  line-height: 26px;
+}
+
+.mono,
+.money {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+.money {
+  font-weight: 500;
+  font-size: 13px;
+  text-align: right;
+  white-space: nowrap;
+}
+.money .cents {
+  font-size: 0.85em;
+}
+.money .cur {
+  font-weight: 400;
+  opacity: 0.7;
+  margin-right: 0.35em;
+}
+
+.colhead {
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgb(var(--v-theme-secondary));
+}
+
+.meta {
+  color: rgb(var(--v-theme-secondary));
+}
+
+.page {
+  max-width: 1560px;
+  margin: 0 auto;
+  padding: 20px 24px 48px;
+}
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--rule);
+}
+
+/* Réguas de livro: filetes de 1px entre as seções. */
+.ruled > * + * {
+  border-top: 1px solid var(--rule);
+}
+
+/* Tabela densa do razão: 32px por linha, zebra, números à direita. */
+table.ledger {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 18px;
+}
+table.ledger th {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgb(var(--v-theme-on-surface));
+  background: rgb(var(--v-theme-surface));
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+table.ledger th.num,
+table.ledger td.num {
+  text-align: right;
+}
+table.ledger td {
+  padding: 0 10px;
+  height: var(--row);
+  border-bottom: 1px solid var(--rule);
+  vertical-align: middle;
+}
+table.ledger tbody tr:nth-child(even) {
+  background: rgb(var(--v-theme-surface-variant), 0.45);
+}
+table.ledger tbody tr.clickable {
+  cursor: pointer;
+}
+table.ledger tbody tr.clickable:hover,
+table.ledger tbody tr.selected {
+  background: rgba(var(--v-theme-primary), 0.08);
+}
+table.ledger a {
+  color: rgb(var(--v-theme-primary));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: rgb(var(--v-theme-secondary));
+  border: 1px dashed var(--rule);
+}
+
+:focus-visible {
+  outline: 2px solid rgb(var(--v-theme-primary));
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
