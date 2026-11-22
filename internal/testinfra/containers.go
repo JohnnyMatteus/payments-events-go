@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
 	tclocalstack "github.com/testcontainers/testcontainers-go/modules/localstack"
@@ -155,12 +156,27 @@ func StartLocalStack(ctx context.Context) (string, func(), error) {
 	return fmt.Sprintf("http://%s:%s", host, port.Port()), terminate, nil
 }
 
-// ResetDatabase apaga os dados entre testes, preservando o schema.
+// ResetDatabase apaga os dados entre testes, preservando o schema. O gatilho
+// que impede TRUNCATE em ledger_entries (migração 0006) é desligado só aqui,
+// dentro de uma transação, e religado antes do commit; a migração e a produção
+// não mudam.
 func ResetDatabase(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	_, err := pool.Exec(context.Background(), `TRUNCATE processed_events, ledger_entries, outbox_messages,
+	ctx := context.Background()
+	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		for _, q := range []string{
+			`ALTER TABLE ledger_entries DISABLE TRIGGER ledger_entries_no_truncate`,
+			`TRUNCATE processed_events, ledger_entries, outbox_messages,
 		consumed_messages, payment_balances, dead_letters, reconciliation_runs, reconciliation_items,
-		divergence_cases, ledger_adjustments, statement_object_claims, processed_events_archive, ledger_archives RESTART IDENTITY CASCADE`)
+		divergence_cases, ledger_adjustments, statement_object_claims, processed_events_archive, ledger_archives RESTART IDENTITY CASCADE`,
+			`ALTER TABLE ledger_entries ENABLE TRIGGER ledger_entries_no_truncate`,
+		} {
+			if _, err := tx.Exec(ctx, q); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatalf("reset database: %v", err)
 	}

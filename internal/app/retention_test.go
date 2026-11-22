@@ -33,6 +33,7 @@ type fakeLedgerArchive struct {
 	askedFor time.Time
 	recorded []LedgerArchive
 	recErr   error
+	limit    int
 }
 
 func (f *fakeLedgerArchive) PendingLedgerMonths(_ context.Context, before time.Time) ([]time.Time, error) {
@@ -40,8 +41,10 @@ func (f *fakeLedgerArchive) PendingLedgerMonths(_ context.Context, before time.T
 	return f.months, nil
 }
 
-func (f *fakeLedgerArchive) LedgerMonthRows(_ context.Context, m time.Time) ([]LedgerArchiveRow, error) {
-	return f.rows[m.Format("2006-01")], nil
+func (f *fakeLedgerArchive) LedgerMonthRows(_ context.Context, m time.Time, limit int) ([]LedgerArchiveRow, error) {
+	f.limit = limit
+	rows := f.rows[m.Format("2006-01")]
+	return rows[:min(limit, len(rows))], nil
 }
 
 func (f *fakeLedgerArchive) RecordLedgerArchive(_ context.Context, a LedgerArchive) (bool, error) {
@@ -130,5 +133,25 @@ func TestRetentionRunSurfacesRecordFailureAndExportIsDeterministic(t *testing.T)
 	b, _ := LedgerCSV(rows)
 	if string(a) != string(b) || string(w.objects["ledger/2026-06.csv"]) != string(a) {
 		t.Fatal("a exportação deve ser determinística")
+	}
+}
+
+// O repositório nunca recebe um limite maior que o máximo mais um, e um mês
+// acima do máximo falha sem exportar nada nem registrar.
+func TestRetentionRunRefusesOversizedMonthWithoutExporting(t *testing.T) {
+	now := time.Date(2026, 11, 22, 10, 0, 0, 0, time.UTC)
+	big := make([]LedgerArchiveRow, MaxLedgerExportRows+1)
+	ledger := &fakeLedgerArchive{
+		months: []time.Time{time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)},
+		rows:   map[string][]LedgerArchiveRow{"2026-06": big},
+	}
+	w := &fakeArchiveWriter{objects: map[string][]byte{}}
+	svc, _ := NewRetentionService(goodPolicy, &fakeRetention{outbox: []int{0}, events: []int{0}}, ledger, w, discardLogger())
+	rep, err := svc.Run(t.Context(), now)
+	if err == nil || len(rep.LedgerMonthsArchived) != 0 || len(w.objects) != 0 || len(ledger.recorded) != 0 {
+		t.Fatalf("Run = %+v, %v, objects=%d, recorded=%d", rep, err, len(w.objects), len(ledger.recorded))
+	}
+	if ledger.limit != MaxLedgerExportRows+1 {
+		t.Fatalf("limit pedido = %d, want %d", ledger.limit, MaxLedgerExportRows+1)
 	}
 }

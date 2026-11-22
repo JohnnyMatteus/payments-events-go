@@ -73,6 +73,7 @@ type outboxDTO struct {
 	CreatedAt     time.Time  `json:"created_at"`
 	PublishedAt   *time.Time `json:"published_at"`
 	NextAttemptAt time.Time  `json:"next_attempt_at"`
+	Archived      bool       `json:"archived"`
 }
 
 type consumptionDTO struct {

@@ -57,7 +57,26 @@ func (r *DeadLetterRepository) Requeue(ctx context.Context, source app.DeadLette
 			return fmt.Errorf("rearm outbox message %s: %w", messageID, err)
 		}
 		if tag.RowsAffected() == 0 {
-			return app.ErrNoOutboxOrigin
+			// A linha publicada pode ter sido apagada pela retenção. Se o
+			// evento consta como publicado e depois purgado, a mensagem é
+			// recriada pendente, com o mesmo message_id, a partir da dead
+			// letter (que guarda a rota e o corpo).
+			if source != app.SourceBroker {
+				return app.ErrNoOutboxOrigin
+			}
+			tag, err = tx.Exec(ctx, `
+				INSERT INTO outbox_messages (message_id, routing_key, payload, headers, resolved_by, resolved_at, resolution_note)
+				SELECT dl.message_id, dl.routing_key, convert_from(dl.payload, 'UTF8')::jsonb, '{}'::jsonb, $2, now(), $3
+				FROM dead_letters dl
+				WHERE dl.id = $1 AND EXISTS (
+					SELECT 1 FROM processed_events pe WHERE pe.event_id = dl.message_id AND pe.outbox_purged_at IS NOT NULL)`,
+				id, operator, note)
+			if err != nil {
+				return fmt.Errorf("recreate purged outbox message %s: %w", messageID, err)
+			}
+			if tag.RowsAffected() == 0 {
+				return app.ErrNoOutboxOrigin
+			}
 		}
 		return closeDeadLetter(ctx, tx, source, id, "requeued", operator, note)
 	})

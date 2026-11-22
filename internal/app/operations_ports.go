@@ -76,6 +76,9 @@ type OutboxView struct {
 	CreatedAt     time.Time
 	PublishedAt   *time.Time
 	NextAttemptAt time.Time
+	// Archived: a linha do outbox foi apagada pela retenção; só resta o fato de
+	// que a mensagem foi publicada (e quando). Os demais campos ficam vazios.
+	Archived bool
 }
 
 // ConsumptionView registra que um consumidor aplicou a mensagem.

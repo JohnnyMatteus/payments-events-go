@@ -96,8 +96,8 @@ type LedgerArchiveRepository interface {
 	// PendingLedgerMonths lista os meses (primeiro dia, UTC) com lançamentos
 	// gravados antes de before e ainda sem exportação registrada.
 	PendingLedgerMonths(ctx context.Context, before time.Time) ([]time.Time, error)
-	// LedgerMonthRows devolve os lançamentos do mês, por id.
-	LedgerMonthRows(ctx context.Context, month time.Time) ([]LedgerArchiveRow, error)
+	// LedgerMonthRows devolve no máximo limit lançamentos do mês, por id.
+	LedgerMonthRows(ctx context.Context, month time.Time, limit int) ([]LedgerArchiveRow, error)
 	// RecordLedgerArchive grava a exportação; false se o mês já estava registrado.
 	RecordLedgerArchive(ctx context.Context, a LedgerArchive) (bool, error)
 }
@@ -197,7 +197,9 @@ func (s *RetentionService) exportLedger(ctx context.Context, now time.Time) ([]s
 }
 
 func (s *RetentionService) exportMonth(ctx context.Context, month time.Time) error {
-	rows, err := s.ledger.LedgerMonthRows(ctx, month)
+	// Pede o máximo mais um: se vier a mais, o mês não cabe e nada é exportado
+	// pela metade. O repositório nunca carrega mais que isso.
+	rows, err := s.ledger.LedgerMonthRows(ctx, month, MaxLedgerExportRows+1)
 	if err != nil {
 		return err
 	}
@@ -205,7 +207,7 @@ func (s *RetentionService) exportMonth(ctx context.Context, month time.Time) err
 		return nil
 	}
 	if len(rows) > MaxLedgerExportRows {
-		return fmt.Errorf("%d rows exceed the export limit of %d", len(rows), MaxLedgerExportRows)
+		return fmt.Errorf("month exceeds the export limit of %d rows", MaxLedgerExportRows)
 	}
 	body, err := LedgerCSV(rows)
 	if err != nil {

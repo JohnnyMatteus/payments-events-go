@@ -65,7 +65,7 @@ const eventColumns = `
 	COALESCE(le.amount_cents, (pe.payload #>> '{data,amount}')::bigint, 0),
 	COALESCE(le.currency, pe.payload #>> '{data,currency}', ''),
 	COALESCE(le.occurred_at, (pe.payload ->> 'created_at')::timestamptz),
-	COALESCE(ob.status, '')`
+	COALESCE(ob.status, CASE WHEN pe.outbox_purged_at IS NOT NULL THEN 'published' ELSE '' END)`
 
 const eventFrom = `
 	FROM processed_events pe
@@ -140,10 +140,7 @@ func escapeLike(s string) string {
 
 // EventTrail monta o caminho webhook → ledger → outbox → consumidores.
 func (r *OperationsReader) EventTrail(ctx context.Context, eventID string) (app.EventTrail, error) {
-	var (
-		trail   app.EventTrail
-		payload []byte
-	)
+	var trail app.EventTrail
 	event, err := scanEvent(r.pool.QueryRow(ctx, "SELECT "+eventColumns+eventFrom+" WHERE pe.event_id = $1", eventID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return trail, app.ErrNotFound
@@ -152,13 +149,26 @@ func (r *OperationsReader) EventTrail(ctx context.Context, eventID string) (app.
 		return trail, fmt.Errorf("query event: %w", err)
 	}
 	trail.Event = event
-	// Evento arquivado: o payload completo está em processed_events_archive.
+	// Evento arquivado: o payload completo está em processed_events_archive. Se
+	// a cópia sumiu, falha: devolver o resumo da linha como se fosse o payload
+	// completo esconderia a perda.
+	var (
+		archived    bool
+		purgedAt    *time.Time
+		outboxPubAt *time.Time
+		payload     []byte
+	)
 	if err := r.pool.QueryRow(ctx, `
-		SELECT CASE WHEN pe.archived_at IS NULL THEN pe.payload
-			ELSE COALESCE((SELECT a.payload FROM processed_events_archive a
-				WHERE a.event_id = pe.event_id AND a.received_at = pe.received_at), pe.payload) END
-		FROM processed_events pe WHERE pe.event_id = $1`, eventID).Scan(&payload); err != nil {
+		SELECT pe.archived_at IS NOT NULL, pe.outbox_purged_at, pe.outbox_published_at,
+			CASE WHEN pe.archived_at IS NULL THEN pe.payload ELSE a.payload END
+		FROM processed_events pe
+		LEFT JOIN processed_events_archive a
+			ON pe.archived_at IS NOT NULL AND a.event_id = pe.event_id AND a.received_at = pe.received_at
+		WHERE pe.event_id = $1`, eventID).Scan(&archived, &purgedAt, &outboxPubAt, &payload); err != nil {
 		return trail, fmt.Errorf("query event payload: %w", err)
+	}
+	if archived && payload == nil {
+		return trail, fmt.Errorf("event %s is archived but its archive copy is missing", eventID)
 	}
 	trail.Payload = payload
 
@@ -184,6 +194,9 @@ func (r *OperationsReader) EventTrail(ctx context.Context, eventID string) (app.
 	switch {
 	case err == nil:
 		trail.Outbox = &o
+	case errors.Is(err, pgx.ErrNoRows) && purgedAt != nil:
+		// A retenção apagou a linha publicada; resta o fato da publicação.
+		trail.Outbox = &app.OutboxView{MessageID: eventID, Status: "published", PublishedAt: outboxPubAt, Archived: true}
 	case !errors.Is(err, pgx.ErrNoRows):
 		return trail, fmt.Errorf("query outbox message: %w", err)
 	}
@@ -327,7 +340,9 @@ func (r *OperationsReader) ListDeadLetters(ctx context.Context, status, messageI
 			SELECT dl.id, 'broker' AS source, dl.message_id, dl.routing_key, dl.payload, dl.reason, dl.error,
 				dl.deliveries, dl.first_failed_at, dl.status, COALESCE(dl.resolved_by, ''), dl.resolved_at,
 				COALESCE(dl.resolution_note, ''),
-				EXISTS (SELECT 1 FROM outbox_messages ob WHERE ob.message_id = dl.message_id) AS has_outbox
+				(EXISTS (SELECT 1 FROM outbox_messages ob WHERE ob.message_id = dl.message_id)
+					OR EXISTS (SELECT 1 FROM processed_events pe
+						WHERE pe.event_id = dl.message_id AND pe.outbox_purged_at IS NOT NULL)) AS has_outbox
 			FROM dead_letters dl
 			UNION ALL
 			SELECT ob.id, 'outbox', ob.message_id, ob.routing_key, convert_to(ob.payload::text, 'UTF8'),

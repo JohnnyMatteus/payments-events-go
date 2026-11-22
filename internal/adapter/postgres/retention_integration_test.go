@@ -4,6 +4,7 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -21,6 +22,20 @@ func ageEvent(t *testing.T, eventID string, at time.Time) {
 	if _, err := pool.Exec(context.Background(),
 		"UPDATE processed_events SET received_at = $2 WHERE event_id = $1", eventID, at); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLedgerCannotBeTruncatedEvenThroughTheForeignKey(t *testing.T) {
+	testinfra.ResetDatabase(t, pool)
+	ingest(t, capture("evt_1", "txn_1", 100))
+	ctx := context.Background()
+	for _, stmt := range []string{"TRUNCATE ledger_entries", "TRUNCATE processed_events CASCADE"} {
+		if _, err := pool.Exec(ctx, stmt); err == nil {
+			t.Errorf("%s deve ser recusado", stmt)
+		}
+	}
+	if count(t, "ledger_entries") != 1 || count(t, "processed_events") != 1 {
+		t.Fatal("o razão e a chave de idempotência têm de continuar lá")
 	}
 }
 
@@ -191,3 +206,146 @@ func TestRetentionRunExportsClosedLedgerMonthsWithoutTouchingTheLedger(t *testin
 }
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+// publishAndAge marca a mensagem como publicada há muito tempo.
+func publishAndAge(t *testing.T, messageID string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE outbox_messages SET status = 'published', published_at = now() - interval '30 days' WHERE message_id = $1`,
+		messageID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func archiveDeadLetter(t *testing.T, messageID string) {
+	t.Helper()
+	var key, body string
+	if err := pool.QueryRow(context.Background(),
+		"SELECT routing_key, payload::text FROM outbox_messages WHERE message_id = $1", messageID).Scan(&key, &body); err != nil {
+		t.Fatal(err)
+	}
+	err := postgres.NewDeadLetterRepository(pool).Archive(context.Background(), app.ArchivedMessage{
+		MessageID: messageID, RoutingKey: key, Payload: []byte(body), Reason: "delivery_limit", Deliveries: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func openDeadLetter(t *testing.T, messageID string) app.DeadLetter {
+	t.Helper()
+	list, err := postgres.NewOperationsReader(pool).ListDeadLetters(context.Background(), "open", messageID)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("dead letters of %s = %+v, %v", messageID, list, err)
+	}
+	return list[0]
+}
+
+// A mensagem com dead letter aberta não é apagada: o redrive precisa dela.
+func TestPurgeKeepsMessagesWithOpenDeadLetter(t *testing.T) {
+	testinfra.ResetDatabase(t, pool)
+	ctx := context.Background()
+	ingest(t, capture("evt_dl", "txn_dl", 100))
+	publishAndAge(t, "evt_dl")
+	archiveDeadLetter(t, "evt_dl")
+
+	n, err := postgres.NewRetention(pool).PurgePublishedOutbox(ctx, time.Now().AddDate(0, 0, -7), 100)
+	if err != nil || n != 0 || count(t, "outbox_messages") != 1 {
+		t.Fatalf("purged = %d, %v, outbox = %d, want 0 and 1", n, err, count(t, "outbox_messages"))
+	}
+	dl := openDeadLetter(t, "evt_dl")
+	if err := postgres.NewDeadLetterRepository(pool).Requeue(ctx, dl.Source, dl.ID, "ana", "banco voltou"); err != nil {
+		t.Fatalf("Requeue: %v", err)
+	}
+}
+
+// A dead letter que chega depois da limpeza também pode ser reprocessada: a
+// mensagem é recriada pendente, com o mesmo message_id.
+func TestRedriveWorksAfterTheOutboxRowWasPurged(t *testing.T) {
+	testinfra.ResetDatabase(t, pool)
+	ctx := context.Background()
+	ingest(t, capture("evt_late", "txn_late", 100))
+	publishAndAge(t, "evt_late")
+	// Guarda a mensagem como o consumidor da DLQ a veria, antes de purgar.
+	var key, body string
+	if err := pool.QueryRow(ctx, "SELECT routing_key, payload::text FROM outbox_messages WHERE message_id = 'evt_late'").Scan(&key, &body); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := postgres.NewRetention(pool).PurgePublishedOutbox(ctx, time.Now().AddDate(0, 0, -7), 100)
+	if err != nil || n != 1 || count(t, "outbox_messages") != 0 {
+		t.Fatalf("purged = %d, %v, outbox = %d, want 1 and 0", n, err, count(t, "outbox_messages"))
+	}
+	err = postgres.NewDeadLetterRepository(pool).Archive(ctx, app.ArchivedMessage{
+		MessageID: "evt_late", RoutingKey: key, Payload: []byte(body), Reason: "delivery_limit", Deliveries: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dl := openDeadLetter(t, "evt_late")
+	if !dl.HasOutbox {
+		t.Fatal("a dead letter de uma mensagem purgada deve poder ser reprocessada (has_outbox)")
+	}
+	if err := postgres.NewDeadLetterRepository(pool).Requeue(ctx, dl.Source, dl.ID, "ana", "banco voltou"); err != nil {
+		t.Fatalf("Requeue after purge: %v", err)
+	}
+	var status, routingKey string
+	if err := pool.QueryRow(ctx, "SELECT status, routing_key FROM outbox_messages WHERE message_id = 'evt_late'").Scan(&status, &routingKey); err != nil {
+		t.Fatalf("a mensagem devia ter voltado ao outbox: %v", err)
+	}
+	if status != "pending" || routingKey != key {
+		t.Fatalf("outbox = %s %s, want pending %s", status, routingKey, key)
+	}
+	if left, _ := postgres.NewOperationsReader(pool).ListDeadLetters(ctx, "open", "evt_late"); len(left) != 0 {
+		t.Fatalf("a dead letter devia estar fechada: %+v", left)
+	}
+
+	// Uma dead letter sem origem no outbox (mensagem estranha) continua recusada.
+	err = postgres.NewDeadLetterRepository(pool).Archive(ctx, app.ArchivedMessage{
+		MessageID: "estranha", RoutingKey: "x", Payload: []byte(`{}`), Reason: "poison", Deliveries: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stranger := openDeadLetter(t, "estranha")
+	if err := postgres.NewDeadLetterRepository(pool).Requeue(ctx, stranger.Source, stranger.ID, "ana", "x"); !errors.Is(err, app.ErrNoOutboxOrigin) {
+		t.Fatalf("Requeue of a message without outbox origin = %v, want ErrNoOutboxOrigin", err)
+	}
+}
+
+// A trilha não mente depois da limpeza: a etapa não vira "nunca publicada".
+func TestTrailAndListStillSayPublishedAfterPurge(t *testing.T) {
+	testinfra.ResetDatabase(t, pool)
+	ctx := context.Background()
+	ingest(t, capture("evt_trail", "txn_trail", 100))
+	publishAndAge(t, "evt_trail")
+	if n, err := postgres.NewRetention(pool).PurgePublishedOutbox(ctx, time.Now().AddDate(0, 0, -7), 100); err != nil || n != 1 {
+		t.Fatalf("purged = %d, %v", n, err)
+	}
+	reader := postgres.NewOperationsReader(pool)
+	trail, err := reader.EventTrail(ctx, "evt_trail")
+	if err != nil || trail.Outbox == nil || !trail.Outbox.Archived || trail.Outbox.Status != "published" || trail.Outbox.PublishedAt == nil {
+		t.Fatalf("trail outbox = %+v, %v", trail.Outbox, err)
+	}
+	page, err := reader.ListEvents(ctx, app.EventFilter{Search: "txn_trail"})
+	if err != nil || len(page.Items) != 1 || page.Items[0].OutboxStatus != "published" {
+		t.Fatalf("list = %+v, %v", page, err)
+	}
+}
+
+// Se a cópia do arquivo sumir, a trilha falha em vez de mostrar o resumo como payload.
+func TestTrailFailsWhenTheArchiveCopyIsMissing(t *testing.T) {
+	testinfra.ResetDatabase(t, pool)
+	ctx := context.Background()
+	ingest(t, capture("evt_gone", "txn_gone", 100))
+	ageEvent(t, "evt_gone", time.Now().AddDate(0, -3, 0).UTC())
+	if n, err := postgres.NewRetention(pool).ArchiveEventPayloads(ctx, time.Now().AddDate(0, 0, -30), 100); err != nil || n != 1 {
+		t.Fatalf("archived = %d, %v", n, err)
+	}
+	if _, err := pool.Exec(ctx, "DELETE FROM processed_events_archive"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := postgres.NewOperationsReader(pool).EventTrail(ctx, "evt_gone"); err == nil {
+		t.Fatal("trilha de evento arquivado sem cópia deve falhar")
+	}
+}

@@ -5,13 +5,17 @@ export const outcomeLabel = (outcome: string): string =>
     duplicate_transaction: 'Transação já lançada',
   })[outcome] ?? outcome;
 
-export const outboxLabel = (status: string): string =>
-  ({
-    pending: 'Aguardando publicação',
-    published: 'Publicada no broker',
-    dead: 'Esgotou as tentativas',
-    discarded: 'Descartada por operador',
-  })[status] ?? status;
+export const outboxLabel = (status: string, archived = false): string => {
+  if (archived && status === 'published') return 'Publicada no broker (linha do outbox arquivada)';
+  return (
+    {
+      pending: 'Aguardando publicação',
+      published: 'Publicada no broker',
+      dead: 'Esgotou as tentativas',
+      discarded: 'Descartada por operador',
+    }[status] ?? status
+  );
+};
 
 export const eventTypeLabel = (type: string): string =>
   ({

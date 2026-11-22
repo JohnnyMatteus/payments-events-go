@@ -14,16 +14,21 @@ se o provedor reenviasse o evento.
 ## Decisão
 
 - **Ledger**: nunca é alterado nem apagado. Um gatilho no banco recusa `UPDATE` e `DELETE` em `ledger_entries` (a regra
-  que era só convenção passa a ser garantia). "Arquivar" é exportar: o job de retenção grava cada mês fechado (UTC, por
+  que era só convenção passa a ser garantia) e outro gatilho, por instrução, recusa `TRUNCATE` (que não dispara
+  gatilho de linha e, via `TRUNCATE processed_events CASCADE`, arrastaria o ledger pela chave estrangeira). "Arquivar" é exportar: o job de retenção grava cada mês fechado (UTC, por
   `recorded_at`) em `ledger/AAAA-MM.csv` no bucket de arquivo (versionado), com sha256 e contagem registrados em
   `ledger_archives`. As linhas continuam no ledger.
 - **`processed_events`**: a linha nunca sai. Depois do prazo, o payload completo vai para `processed_events_archive`
   (particionada por mês, partições criadas pelo job) e o payload da linha vira o resumo que a lista de eventos usa. A
   cópia e a redução acontecem numa transação e só se o arquivo tiver todas as cópias. A trilha do evento lê o payload do
-  arquivo.
-- **Outbox**: só mensagens `published` com mais de N dias são apagadas. `pending`, `dead` e `discarded` ficam, porque
-  alguém ainda precisa delas. O efeito é seguro: a idempotência do consumidor está em `consumed_messages`, e a do
-  webhook em `processed_events`.
+  arquivo e, se a cópia não existir, falha em vez de devolver o resumo como se fosse o payload completo.
+- **Outbox**: só mensagens `published` com mais de N dias são apagadas. `pending`, `dead` e `discarded` ficam, e uma
+  mensagem com dead letter aberta também. A idempotência do consumidor está em `consumed_messages` e a do webhook em
+  `processed_events`, então apagar a linha publicada não a afeta. Antes de apagar, a mesma instrução grava em
+  `processed_events` o fato mínimo (`outbox_published_at`, `outbox_purged_at`): a trilha mostra "publicada, linha do
+  outbox arquivada" (e não "sem mensagem"), a lista mantém o status e o redrive de uma dead letter que chegar depois
+  da limpeza recria a mensagem pendente, com o mesmo `message_id`, a partir da rota e do corpo guardados na própria
+  dead letter. Dead letter sem origem no outbox continua recusada.
 - **Execução**: `payments retention`, um job (CronJob), nunca no caminho do webhook. Execuções concorrentes se
   serializam por advisory lock; cada rotina anda em lotes.
 - **Prazos configuráveis**: `RETENTION_OUTBOX_AFTER` (7 dias), `RETENTION_EVENTS_AFTER` (30 dias),
@@ -42,8 +47,13 @@ se o provedor reenviasse o evento.
   particionado de `processed_events` e a exportação mensal do ledger.
 - Nenhum prazo legal de guarda foi definido; os padrões acima são pontos de partida. Quem definir o prazo regulatório
   deve ajustá-los e decidir se o arquivo do bucket ganha bloqueio de objeto (object lock) e ciclo de vida.
-- A exportação do mês carrega as linhas na memória (limite de 2 milhões, acima disso o job falha). Para meses
-  maiores é preciso exportar em partes.
+- A exportação do mês carrega as linhas na memória. O repositório recebe `LIMIT` de 2 milhões mais um, então nunca
+  lê mais que isso; um mês maior falha sem exportar nada. Streaming para o objeto removeria o limite e fica como
+  evolução.
+- **O dono da tabela ainda pode desabilitar os gatilhos** (`ALTER TABLE ... DISABLE TRIGGER`) ou apagar a tabela. Em
+  produção a aplicação deve conectar com um papel que não é dono das tabelas (só `SELECT`, `INSERT`, e `UPDATE`/`DELETE`
+  onde o código precisa, nunca em `ledger_entries`), e as migrações rodar com outro papel. O ambiente de teste
+  desliga o gatilho de `TRUNCATE` só dentro de `testinfra.ResetDatabase`, em transação; a migração não muda.
 - Testes de integração (gatilho, arquivamento, idempotência depois do arquivamento, limpeza do outbox, exportação)
   rodam só no CI, que tem Postgres.
 

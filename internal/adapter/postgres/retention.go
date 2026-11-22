@@ -28,19 +28,34 @@ var (
 // NewRetention cria o repositório de retenção.
 func NewRetention(pool *pgxpool.Pool) *Retention { return &Retention{pool: pool} }
 
-// PurgePublishedOutbox apaga mensagens já publicadas. As demais ficam.
+// PurgePublishedOutbox apaga mensagens já publicadas. As demais ficam, e uma
+// mensagem com dead letter aberta também fica (o redrive precisa dela). Antes
+// de apagar, grava em processed_events o fato de que ela foi publicada e a
+// hora, na mesma instrução, para a trilha e o redrive não dependerem da linha.
 func (r *Retention) PurgePublishedOutbox(ctx context.Context, before time.Time, limit int) (int, error) {
-	tag, err := r.pool.Exec(ctx, `
+	var purged int
+	err := r.pool.QueryRow(ctx, `
 		WITH doomed AS (
-			SELECT id FROM outbox_messages
-			WHERE status = 'published' AND published_at < $1
-			ORDER BY id LIMIT $2
-			FOR UPDATE SKIP LOCKED)
-		DELETE FROM outbox_messages o USING doomed d WHERE o.id = d.id`, before, limit)
+			SELECT ob.id, ob.message_id, ob.published_at FROM outbox_messages ob
+			WHERE ob.status = 'published' AND ob.published_at < $1
+			  AND EXISTS (SELECT 1 FROM processed_events pe WHERE pe.event_id = ob.message_id)
+			  AND NOT EXISTS (SELECT 1 FROM dead_letters dl WHERE dl.message_id = ob.message_id AND dl.status = 'open')
+			ORDER BY ob.id LIMIT $2
+			FOR UPDATE OF ob SKIP LOCKED),
+		marked AS (
+			UPDATE processed_events pe
+			SET outbox_published_at = d.published_at, outbox_purged_at = now()
+			FROM doomed d WHERE pe.event_id = d.message_id
+			RETURNING pe.event_id),
+		gone AS (
+			DELETE FROM outbox_messages o USING doomed d
+			WHERE o.id = d.id AND d.message_id IN (SELECT event_id FROM marked)
+			RETURNING o.id)
+		SELECT count(*) FROM gone`, before, limit).Scan(&purged)
 	if err != nil {
 		return 0, fmt.Errorf("purge published outbox: %w", err)
 	}
-	return int(tag.RowsAffected()), nil
+	return purged, nil
 }
 
 // summarizedPayload é o que as telas leem de processed_events.payload quando o
@@ -167,15 +182,17 @@ func (r *Retention) PendingLedgerMonths(ctx context.Context, before time.Time) (
 	return months, nil
 }
 
-// LedgerMonthRows devolve os lançamentos gravados no mês (UTC), por id.
-func (r *Retention) LedgerMonthRows(ctx context.Context, month time.Time) ([]app.LedgerArchiveRow, error) {
+// LedgerMonthRows devolve até limit lançamentos gravados no mês (UTC), por id.
+// O limite vai na consulta: o chamador pede o máximo mais um para saber se o
+// mês cabe, sem nunca carregar o mês inteiro.
+func (r *Retention) LedgerMonthRows(ctx context.Context, month time.Time, limit int) ([]app.LedgerArchiveRow, error) {
 	month = monthStart(month)
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, event_id, COALESCE(merchant_id, ''), transaction_id, payment_id, direction, amount_cents,
 			currency, occurred_at, recorded_at, kind, COALESCE(adjusts_transaction_id, '')
 		FROM ledger_entries
 		WHERE recorded_at >= $1 AND recorded_at < $2
-		ORDER BY id`, month, month.AddDate(0, 1, 0))
+		ORDER BY id LIMIT $3`, month, month.AddDate(0, 1, 0), limit)
 	if err != nil {
 		return nil, fmt.Errorf("query ledger month: %w", err)
 	}
