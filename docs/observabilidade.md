@@ -41,6 +41,7 @@ O job `reconcile` escreve logs em stderr para deixar o relatório limpo em stdou
 | `outbox_dead_total` | counter | | há mensagens que exigem ação manual? |
 | `outbox_publish_lag_seconds` | histogram | | quanto tempo entre o lançamento e o evento sair? |
 | `consumer_messages_total` | counter | `outcome` (`acked`, `requeued`, `dead_lettered`) | o consumidor está falhando? |
+| `idempotency_fastpath_total` | counter | `result` (`acquired`, `in_flight`, `done`, `error`) | o atalho do Redis está respondendo reentregas? |
 | `go_*`, `process_*` | vários | | saúde do runtime |
 | `rabbitmq_*` (porta 15692) | vários | fila | profundidade da fila e da DLQ |
 
@@ -56,6 +57,14 @@ histogram_quantile(0.99, sum by (le) (rate(outbox_publish_lag_seconds_bucket[5m]
 # mensagens na DLQ
 rabbitmq_queue_messages{queue="balance-projector.dlq"}
 ```
+
+## Alertas
+
+`deploy/prometheus/alerts.yml` traz os sinais sugeridos no design doc: mensagem morta no outbox, p99 do atraso de
+publicação acima de 30 s, assinatura inválida em excesso, webhook com erro 5xx e DLQ com mensagens. O Prometheus do
+compose carrega o arquivo e o CI valida a sintaxe com `promtool`. Os limiares são pontos de partida, não medidos.
+Alerta para o job de conciliação com divergência (código 3) não existe como regra: no Kubernetes use a falha do CronJob
+(kube-state-metrics).
 
 ## Traces
 

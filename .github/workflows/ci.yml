@@ -143,6 +143,10 @@ jobs:
           docker run --rm --security-opt no-new-privileges -v "$RUNNER_TEMP/scan/in:/in:ro" \
             aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb \
             image --input /in/image.tar --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress
+      - name: promtool (regras de alerta e configuração do Prometheus)
+        run: |
+          docker run --rm -v "$PWD/deploy/prometheus:/p:ro" --entrypoint promtool prom/prometheus:v3.5.0 check rules /p/alerts.yml
+          docker run --rm -v "$PWD/deploy/prometheus:/p:ro" --entrypoint promtool prom/prometheus:v3.5.0 check config /p/prometheus.yml
       - name: docker compose config
         run: docker compose --profile core --profile observability --profile tools config --quiet
       - name: helm lint e template

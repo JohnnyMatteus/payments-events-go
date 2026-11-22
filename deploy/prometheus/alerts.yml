@@ -1,0 +1,44 @@
+# Alertas sugeridos no design doc (seção 8). Os limiares são pontos de partida:
+# ajuste depois de ver o tráfego real. O job de conciliação com código 3 não
+# tem métrica aqui: no Kubernetes, alerte na falha do CronJob (kube-state-metrics).
+groups:
+  - name: payments-events-go
+    rules:
+      - alert: OutboxMessageDead
+        expr: increase(outbox_dead_total[15m]) > 0
+        labels: {severity: page}
+        annotations:
+          summary: Mensagem do outbox esgotou as tentativas
+          description: Há mensagens em status dead; reprocesse ou descarte pelo painel (DLQ).
+
+      - alert: OutboxPublishLagHigh
+        expr: histogram_quantile(0.99, sum by (le) (rate(outbox_publish_lag_seconds_bucket[5m]))) > 30
+        for: 5m
+        labels: {severity: warn}
+        annotations:
+          summary: p99 do atraso de publicação do outbox acima de 30 s
+          description: O relay está atrasado ou o broker está instável.
+
+      - alert: WebhookInvalidSignatureHigh
+        expr: sum(rate(webhook_requests_total{outcome="invalid_signature"}[5m])) > 0.5
+        for: 10m
+        labels: {severity: warn}
+        annotations:
+          summary: Muitos webhooks com assinatura inválida
+          description: Tentativa de forjar eventos ou segredo desalinhado com o provedor (confira a rotação).
+
+      - alert: WebhookErrors
+        expr: sum(rate(webhook_requests_total{outcome="error"}[5m])) > 0
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: Webhooks respondendo erro 5xx
+          description: O provedor vai reenviar; confira o banco e os logs da API.
+
+      - alert: DeadLetterQueueNotEmpty
+        expr: rabbitmq_queue_messages{queue="balance-projector.dlq"} > 0
+        for: 5m
+        labels: {severity: warn}
+        annotations:
+          summary: Há mensagens na DLQ do consumidor
+          description: "Trate pelo painel (DLQ): reprocessar ou descartar com motivo."
