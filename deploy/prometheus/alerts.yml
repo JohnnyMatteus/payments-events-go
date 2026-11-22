@@ -1,6 +1,7 @@
 # Alertas sugeridos no design doc (seção 8). Os limiares são pontos de partida:
-# ajuste depois de ver o tráfego real. O job de conciliação com código 3 não
-# tem métrica aqui: no Kubernetes, alerte na falha do CronJob (kube-state-metrics).
+# ajuste depois de ver o tráfego real. Cada regra tem um caso em alerts_test.yml
+# (`promtool test rules`, no CI). Os contadores nascem em 0 no processo, para a
+# primeira ocorrência ser vista por increase().
 groups:
   - name: payments-events-go
     rules:
@@ -36,9 +37,35 @@ groups:
           description: O provedor vai reenviar; confira o banco e os logs da API.
 
       - alert: DeadLetterQueueNotEmpty
-        expr: rabbitmq_queue_messages{queue="balance-projector.dlq"} > 0
+        # O endpoint agregado (/metrics) não traz métrica por fila; esta vem de
+        # /metrics/detailed?family=queue_coarse_metrics (prefixo rabbitmq_detailed_).
+        # O consumidor da DLQ arquiva a mensagem e a retira da fila: se ela fica parada, o arquivamento está falhando.
+        expr: rabbitmq_detailed_queue_messages{queue="balance-projector.dlq"} > 0
         for: 5m
         labels: {severity: warn}
         annotations:
-          summary: Há mensagens na DLQ do consumidor
+          summary: Mensagens paradas na DLQ do consumidor
+          description: "O consumidor da DLQ não está arquivando; confira os logs do consumer."
+
+      - alert: DeadLettersOpen
+        expr: max(pipeline_dead_letters_open) > 0
+        for: 5m
+        labels: {severity: warn}
+        annotations:
+          summary: Há dead letters abertas
           description: "Trate pelo painel (DLQ): reprocessar ou descartar com motivo."
+
+      - alert: ReconciliationOpenCases
+        expr: max(reconciliation_open_cases) > 0
+        for: 30m
+        labels: {severity: warn}
+        annotations:
+          summary: Divergências da conciliação sem decisão
+          description: "Justifique ou proponha ajuste pelo painel (Conciliação)."
+
+      - alert: ReconciliationStale
+        expr: (time() - max(reconciliation_last_run_timestamp_seconds) > 129600) and (max(reconciliation_last_run_timestamp_seconds) > 0)
+        labels: {severity: warn}
+        annotations:
+          summary: A conciliação não roda há mais de 36 horas
+          description: "Confira o watcher, o agendamento e o extrato no bucket."

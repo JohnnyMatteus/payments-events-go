@@ -1,0 +1,198 @@
+# Um caso que dispara e um que não dispara por regra (promtool test rules, no CI).
+# Gerado a partir de alerts.yml; ao mudar uma regra, atualize os casos.
+rule_files:
+- alerts.yml
+evaluation_interval: 1m
+tests:
+- interval: 1m
+  input_series:
+  - series: outbox_dead_total
+    values: 0 0 0 1 1 1
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: OutboxMessageDead
+    exp_alerts:
+    - exp_labels:
+        severity: page
+      exp_annotations:
+        summary: Mensagem do outbox esgotou as tentativas
+        description: Há mensagens em status dead; reprocesse ou descarte pelo painel
+          (DLQ).
+- interval: 1m
+  input_series:
+  - series: outbox_dead_total
+    values: 0 0 0 0 0 0
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: OutboxMessageDead
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: outbox_publish_lag_seconds_bucket{le="0.01"}
+    values: '0x13'
+  - series: outbox_publish_lag_seconds_bucket{le="15"}
+    values: '0x13'
+  - series: outbox_publish_lag_seconds_bucket{le="60"}
+    values: 0+10x13
+  - series: outbox_publish_lag_seconds_bucket{le="+Inf"}
+    values: 0+10x13
+  alert_rule_test:
+  - eval_time: 12m
+    alertname: OutboxPublishLagHigh
+    exp_alerts:
+    - exp_labels:
+        severity: warn
+      exp_annotations:
+        summary: p99 do atraso de publicação do outbox acima de 30 s
+        description: O relay está atrasado ou o broker está instável.
+- interval: 1m
+  input_series:
+  - series: outbox_publish_lag_seconds_bucket{le="0.01"}
+    values: 0+10x13
+  - series: outbox_publish_lag_seconds_bucket{le="15"}
+    values: 0+10x13
+  - series: outbox_publish_lag_seconds_bucket{le="60"}
+    values: 0+10x13
+  - series: outbox_publish_lag_seconds_bucket{le="+Inf"}
+    values: 0+10x13
+  alert_rule_test:
+  - eval_time: 12m
+    alertname: OutboxPublishLagHigh
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: webhook_requests_total{outcome="invalid_signature"}
+    values: 0+60x20
+  alert_rule_test:
+  - eval_time: 18m
+    alertname: WebhookInvalidSignatureHigh
+    exp_alerts:
+    - exp_labels:
+        severity: warn
+      exp_annotations:
+        summary: Muitos webhooks com assinatura inválida
+        description: Tentativa de forjar eventos ou segredo desalinhado com o provedor
+          (confira a rotação).
+- interval: 1m
+  input_series:
+  - series: webhook_requests_total{outcome="invalid_signature"}
+    values: 0+6x20
+  alert_rule_test:
+  - eval_time: 18m
+    alertname: WebhookInvalidSignatureHigh
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: webhook_requests_total{outcome="error"}
+    values: 0 0 0 1 2 3 4 5 6 7 8 9 10 11 12 13
+  alert_rule_test:
+  - eval_time: 12m
+    alertname: WebhookErrors
+    exp_alerts:
+    - exp_labels:
+        severity: page
+      exp_annotations:
+        summary: Webhooks respondendo erro 5xx
+        description: O provedor vai reenviar; confira o banco e os logs da API.
+- interval: 1m
+  input_series:
+  - series: webhook_requests_total{outcome="error"}
+    values: '0x15'
+  alert_rule_test:
+  - eval_time: 12m
+    alertname: WebhookErrors
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: rabbitmq_detailed_queue_messages{queue="balance-projector.dlq",vhost="/"}
+    values: 3x10
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: DeadLetterQueueNotEmpty
+    exp_alerts:
+    - exp_labels:
+        severity: warn
+        queue: balance-projector.dlq
+        vhost: "/"
+      exp_annotations:
+        summary: Mensagens paradas na DLQ do consumidor
+        description: O consumidor da DLQ não está arquivando; confira os logs do consumer.
+- interval: 1m
+  input_series:
+  - series: rabbitmq_detailed_queue_messages{queue="balance-projector.dlq",vhost="/"}
+    values: '0x10'
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: DeadLetterQueueNotEmpty
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: pipeline_dead_letters_open
+    values: 1x10
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: DeadLettersOpen
+    exp_alerts:
+    - exp_labels:
+        severity: warn
+      exp_annotations:
+        summary: Há dead letters abertas
+        description: 'Trate pelo painel (DLQ): reprocessar ou descartar com motivo.'
+- interval: 1m
+  input_series:
+  - series: pipeline_dead_letters_open
+    values: '0x10'
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: DeadLettersOpen
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: reconciliation_open_cases
+    values: 2x50
+  alert_rule_test:
+  - eval_time: 45m
+    alertname: ReconciliationOpenCases
+    exp_alerts:
+    - exp_labels:
+        severity: warn
+      exp_annotations:
+        summary: Divergências da conciliação sem decisão
+        description: Justifique ou proponha ajuste pelo painel (Conciliação).
+- interval: 1m
+  input_series:
+  - series: reconciliation_open_cases
+    values: '0x50'
+  alert_rule_test:
+  - eval_time: 45m
+    alertname: ReconciliationOpenCases
+    exp_alerts: []
+- interval: 1h
+  input_series:
+  - series: reconciliation_last_run_timestamp_seconds
+    values: 1x40
+  alert_rule_test:
+  - eval_time: 40h
+    alertname: ReconciliationStale
+    exp_alerts:
+    - exp_labels:
+        severity: warn
+      exp_annotations:
+        summary: A conciliação não roda há mais de 36 horas
+        description: Confira o watcher, o agendamento e o extrato no bucket.
+- interval: 1h
+  input_series:
+  - series: reconciliation_last_run_timestamp_seconds
+    values: 140000x40
+  alert_rule_test:
+  - eval_time: 40h
+    alertname: ReconciliationStale
+    exp_alerts: []
+- interval: 1h
+  input_series:
+  - series: reconciliation_last_run_timestamp_seconds
+    values: '0x40'
+  alert_rule_test:
+  - eval_time: 40h
+    alertname: ReconciliationStale
+    exp_alerts: []

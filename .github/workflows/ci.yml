@@ -147,6 +147,8 @@ jobs:
         run: |
           docker run --rm -v "$PWD/deploy/prometheus:/p:ro" --entrypoint promtool prom/prometheus:v3.5.0 check rules /p/alerts.yml
           docker run --rm -v "$PWD/deploy/prometheus:/p:ro" --entrypoint promtool prom/prometheus:v3.5.0 check config /p/prometheus.yml
+          # Um caso que dispara e um que não dispara por regra de alerta.
+          docker run --rm -v "$PWD/deploy/prometheus:/p:ro" --entrypoint promtool prom/prometheus:v3.5.0 test rules /p/alerts_test.yml
       - name: docker compose config
         run: docker compose --profile core --profile observability --profile tools config --quiet
       - name: helm lint e template

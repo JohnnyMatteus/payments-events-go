@@ -388,6 +388,10 @@ func (r *OperationsReader) PipelineHealth(ctx context.Context, now time.Time) (a
 		return h, fmt.Errorf("query reconciliation health: %w", err)
 	}
 	h.LastReconciliationAt = lastReconciliationAt
+	if err := r.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM divergence_cases WHERE status IN ('open', 'adjustment_proposed')`).Scan(&h.OpenCases); err != nil {
+		return h, fmt.Errorf("query open cases: %w", err)
+	}
 	return h, nil
 }
 

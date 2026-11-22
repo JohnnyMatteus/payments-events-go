@@ -135,6 +135,8 @@ type PipelineHealth struct {
 	OldestDeadLetterAge  time.Duration
 	LastConsumedAt       *time.Time
 	LastReconciliationAt *time.Time
+	// OpenCases: divergências da conciliação ainda sem decisão (abertas ou com ajuste proposto).
+	OpenCases int
 }
 
 // DeadLetterSource diz de onde vem a mensagem morta.

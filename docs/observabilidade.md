@@ -40,6 +40,7 @@ O job `reconcile` escreve logs em stderr para deixar o relatório limpo em stdou
 | `outbox_retries_total` | counter | | o broker está instável? |
 | `outbox_dead_total` | counter | | há mensagens que exigem ação manual? |
 | `outbox_publish_lag_seconds` | histogram | | quanto tempo entre o lançamento e o evento sair? |
+| `pipeline_*`, `reconciliation_*` | gauge | | estado do pipeline lido do banco (publicado só pelo relay) |
 | `consumer_messages_total` | counter | `outcome` (`acked`, `requeued`, `dead_lettered`) | o consumidor está falhando? |
 | `idempotency_fastpath_total` | counter | `result` (`acquired`, `in_flight`, `done`, `error`) | o atalho do Redis está respondendo reentregas? |
 | `go_*`, `process_*` | vários | | saúde do runtime |
@@ -61,10 +62,20 @@ rabbitmq_queue_messages{queue="balance-projector.dlq"}
 ## Alertas
 
 `deploy/prometheus/alerts.yml` traz os sinais sugeridos no design doc: mensagem morta no outbox, p99 do atraso de
-publicação acima de 30 s, assinatura inválida em excesso, webhook com erro 5xx e DLQ com mensagens. O Prometheus do
-compose carrega o arquivo e o CI valida a sintaxe com `promtool`. Os limiares são pontos de partida, não medidos.
-Alerta para o job de conciliação com divergência (código 3) não existe como regra: no Kubernetes use a falha do CronJob
-(kube-state-metrics).
+publicação acima de 30 s, assinatura inválida em excesso, webhook com erro 5xx, mensagens paradas na DLQ do broker,
+dead letters abertas, divergências da conciliação sem decisão e conciliação parada há mais de 36 h. O Prometheus do
+compose carrega o arquivo; o CI roda `promtool check` e `promtool test rules` (`alerts_test.yml`, um caso que dispara e um
+que não dispara por regra). Os limiares são pontos de partida, não medidos.
+
+- Os contadores (`outbox_*`, `webhook_requests_total`, `consumer_messages_total`, `idempotency_fastpath_total`) nascem em
+  0 no processo: sem isso o salto de "série ausente" para 1 não vira `increase() > 0` e a primeira ocorrência passaria sem alerta.
+- A profundidade da DLQ vem do endpoint `/metrics/detailed?family=queue_coarse_metrics` do RabbitMQ (job `rabbitmq-queues`),
+  métrica `rabbitmq_detailed_queue_messages{queue="balance-projector.dlq"}`; o `/metrics` agregado não traz métrica por fila.
+  Como o consumidor da DLQ arquiva a mensagem e a retira da fila, essa fila fica vazia em operação normal: o sinal de
+  "há dead letters para tratar" é `pipeline_dead_letters_open`.
+- O relay publica gauges de estado lidos do banco (`pipeline_outbox_pending`, `pipeline_outbox_dead`,
+  `pipeline_dead_letters_open`, `pipeline_oldest_pending_seconds`, `reconciliation_open_cases`,
+  `reconciliation_last_run_timestamp_seconds`). Se a leitura falhar, a coleta não publica valor velho.
 
 ## Traces
 

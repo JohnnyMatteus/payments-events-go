@@ -15,3 +15,9 @@ scrape_configs:
     static_configs: [{targets: ["watcher:9090"]}]
   - job_name: rabbitmq
     static_configs: [{targets: ["rabbitmq:15692"]}]
+  # Métrica por fila (profundidade da DLQ): o /metrics agregado não a traz.
+  - job_name: rabbitmq-queues
+    metrics_path: /metrics/detailed
+    params:
+      family: [queue_coarse_metrics]
+    static_configs: [{targets: ["rabbitmq:15692"]}]

@@ -35,6 +35,13 @@ func NewRelayMetrics() (*RelayMetrics, error) {
 	if err := errors.Join(errP, errR, errD, errL); err != nil {
 		return nil, err
 	}
+	// Um contador OTel só aparece no /metrics depois do primeiro Add, e o
+	// Prometheus não conta o salto de "série ausente" para 1 em increase():
+	// sem isto a primeira mensagem morta passaria sem alerta. Add(0) cria a série em 0.
+	ctx := context.Background()
+	published.Add(ctx, 0)
+	retried.Add(ctx, 0)
+	dead.Add(ctx, 0)
 	return &RelayMetrics{published: published, retried: retried, dead: dead, lag: lag}, nil
 }
 

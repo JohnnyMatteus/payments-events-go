@@ -13,6 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+
 	"github.com/JohnnyMatteus/payments-events-go/internal/app"
 	"github.com/JohnnyMatteus/payments-events-go/internal/domain"
 )
@@ -185,5 +189,40 @@ func TestRouterHealthAndReadiness(t *testing.T) {
 	newTestServer(t, &stubIngester{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, WebhookPath, nil))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("GET webhook = %d, want 405", rec.Code)
+	}
+}
+
+// Todos os valores de outcome existem em 0 ao criar o handler: o primeiro 5xx
+// ou a primeira assinatura inválida precisam ser vistos por increase().
+func TestWebhookOutcomeSeriesStartAtZero(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	otel.SetMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)))
+	v, err := NewVerifier([]string{"s"}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewWebhookHandler(v, nil, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatal(err)
+	}
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]int64{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "webhook_requests_total" {
+				continue
+			}
+			for _, dp := range m.Data.(metricdata.Sum[int64]).DataPoints {
+				outcome, _ := dp.Attributes.Value("outcome")
+				seen[outcome.AsString()] = dp.Value
+			}
+		}
+	}
+	for _, want := range []string{"error", "invalid_signature", "stale_timestamp", "rate_limited", "recorded", "duplicate"} {
+		if v, ok := seen[want]; !ok || v != 0 {
+			t.Errorf("outcome %q: presente=%v valor=%d, want presente em 0", want, ok, v)
+		}
 	}
 }
