@@ -207,6 +207,11 @@ func (r *CaseRepository) ApproveAdjustment(ctx context.Context, id int64, decide
 	actor app.Actor, note string) (app.Adjustment, error) {
 	var out app.Adjustment
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		// O lock de escrita do ledger vem antes do lock de linha do ajuste: a aprovação grava
+		// um lançamento (record), e a ordem dos locks é a mesma do webhook (ADR 0019).
+		if err := lockLedgerAppend(ctx, tx); err != nil {
+			return err
+		}
 		a, err := lockAdjustment(ctx, tx, id)
 		if err != nil {
 			return err

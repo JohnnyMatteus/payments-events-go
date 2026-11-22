@@ -11,6 +11,7 @@ import (
 
 	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/postgres"
 	"github.com/JohnnyMatteus/payments-events-go/internal/app"
+	"github.com/JohnnyMatteus/payments-events-go/internal/domain"
 	"github.com/JohnnyMatteus/payments-events-go/internal/testinfra"
 )
 
@@ -123,5 +124,77 @@ func TestRecorderWaitsForTheLedgerBoundLock(t *testing.T) {
 	}
 	if count(t, "ledger_entries") != 1 {
 		t.Fatal("o lançamento devia ter sido gravado")
+	}
+}
+
+// A aprovação de ajuste também grava no ledger: pega o lock compartilhado antes
+// de travar a linha do ajuste (mesma ordem do webhook). Com o lock exclusivo do
+// leitor retido, a aprovação espera sem ter travado a linha do ajuste.
+func TestApproveAdjustmentTakesTheAppendLockBeforeLockingTheAdjustmentRow(t *testing.T) {
+	testinfra.ResetDatabase(t, pool)
+	ctx := context.Background()
+	ingest(t, capture("evt_1", "txn_1", 10000))
+	store := postgres.NewReconciliationStore(pool)
+	cases := postgres.NewCaseRepository(pool)
+	svc := app.NewCaseService(cases)
+	stmt := []domain.StatementLine{{LineNumber: 2, TransactionID: "txn_1", PaymentID: "pay_txn_1", Direction: domain.Credit,
+		AmountCents: 9500, Currency: "BRL", OccurredAt: baseTime}}
+	reconcileDay(t, store, stmt)
+	open, err := cases.ListCases(ctx, app.CaseFilter{Status: "open"})
+	if err != nil || len(open) != 1 {
+		t.Fatalf("open cases = %v, %v", open, err)
+	}
+	adj, err := svc.ProposeAdjustment(as(ctx, "ana"), open[0].ID, "provedor reteve taxa")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			_, _ = conn.Exec(ctx, "SELECT pg_advisory_unlock($1)", int64(postgres.LedgerAppendLockKey))
+			conn.Release()
+		}
+	}
+	defer release()
+	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", int64(postgres.LedgerAppendLockKey)); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	finished := make(chan struct{})
+	go func() {
+		_, err := svc.ApproveAdjustment(as(ctx, "bruno"), adj.ID, "ok")
+		done <- err
+		close(finished)
+	}()
+	if !notDoneWithin(finished, 400*time.Millisecond) {
+		t.Fatal("a aprovação gravou no ledger com o lock exclusivo do leitor retido")
+	}
+	// Bloqueada no lock do ledger, a aprovação ainda não pode ter travado a linha do ajuste.
+	probe, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := probe.Exec(ctx, "SELECT 1 FROM ledger_adjustments WHERE id = $1 FOR UPDATE NOWAIT", adj.ID); err != nil {
+		t.Fatalf("a linha do ajuste já estava travada: o lock do ledger deve vir antes do FOR UPDATE: %v", err)
+	}
+	_ = probe.Rollback(ctx)
+	release()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("approve: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a aprovação não terminou depois de o lock ser liberado")
+	}
+	if count(t, "ledger_entries") != 2 {
+		t.Fatal("o ajuste aprovado devia virar lançamento")
 	}
 }

@@ -55,6 +55,16 @@ groups:
           summary: Há dead letters abertas
           description: "Trate pelo painel (DLQ): reprocessar ou descartar com motivo."
 
+      - alert: PipelineGaugesAbsent
+        # Os gauges vêm do relay lendo o banco. Banco fora, relay parado ou sem scrape: as regras que dependem deles
+        # (DeadLettersOpen, ReconciliationOpenCases, ReconciliationStale) ficariam mudas, então a ausência também alerta.
+        expr: absent(pipeline_dead_letters_open)
+        for: 10m
+        labels: {severity: warn}
+        annotations:
+          summary: Os gauges do pipeline sumiram
+          description: "O relay não publica o estado do banco (banco fora, relay parado ou sem scrape): os alertas de dead letters e conciliação estão cegos."
+
       - alert: ReconciliationOpenCases
         expr: max(reconciliation_open_cases) > 0
         for: 30m
