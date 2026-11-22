@@ -46,7 +46,7 @@ func (s stubCases) ApproveAdjustment(_ context.Context, _ int64, decide func(app
 
 func newTestMux(t *testing.T, deps AdminDeps) http.Handler {
 	t.Helper()
-	auth, err := NewOperatorAuth([]string{"ana:token-da-ana", "bruno:token-do-bruno"})
+	auth, err := NewOperatorAuth([]string{"ana:operador:token-da-ana", "bruno:operador:token-do-bruno", "carla:leitor:token-da-carla"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,8 @@ func TestAdminRequiresOperatorToken(t *testing.T) {
 }
 
 func TestOperatorAuthRejectsWeakConfig(t *testing.T) {
-	for _, entries := range [][]string{nil, {"ana"}, {"ana:curto"}, {"ana:12345678", "ANA:87654321"}} {
+	for _, entries := range [][]string{nil, {"ana"}, {"ana:operador"}, {"ana:operador:curto"}, {"ana:12345678"}, {"ana:admin:12345678"},
+		{"ana:operador:12345678", "ANA:leitor:87654321"}} {
 		if _, err := NewOperatorAuth(entries); err == nil {
 			t.Errorf("NewOperatorAuth(%v) must fail", entries)
 		}
@@ -130,5 +131,40 @@ func TestDeadLetterListCarriesAgeAndReprocessability(t *testing.T) {
 	}
 	if out.Items[0].AgeSeconds != 3*3600 || !out.Items[0].CanReprocess || out.Items[1].CanReprocess {
 		t.Fatalf("items = %+v", out.Items)
+	}
+}
+
+func TestReaderRoleCanQueryButNotAct(t *testing.T) {
+	dl := &stubDeadLetters{}
+	cases := stubCases{adjustment: app.Adjustment{ID: 1, Status: domain.AdjustmentProposed, ProposedBy: "bruno"}}
+	mux := newTestMux(t, AdminDeps{
+		Reader: stubReader{}, DeadLetters: app.NewDeadLetterService(dl),
+		CaseService: app.NewCaseService(cases), Cases: cases,
+	})
+	reader := "token-da-carla"
+	if rec := call(mux, http.MethodGet, "/api/v1/dead-letters", reader, ""); rec.Code != http.StatusOK {
+		t.Fatalf("reader query: status = %d, want 200", rec.Code)
+	}
+	if rec := call(mux, http.MethodGet, "/api/v1/me", reader, ""); !bytes.Contains(rec.Body.Bytes(), []byte(`"role":"leitor"`)) {
+		t.Fatalf("me = %s", rec.Body)
+	}
+	actions := []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/dead-letters/broker/4/reprocess"},
+		{http.MethodPost, "/api/v1/dead-letters/broker/4/discard"},
+		{http.MethodPut, "/api/v1/statements/2026-11-20"},
+		{http.MethodPost, "/api/v1/reconciliation/runs"},
+		{http.MethodPost, "/api/v1/cases/1/explain"},
+		{http.MethodPost, "/api/v1/cases/1/adjustments"},
+		{http.MethodPost, "/api/v1/adjustments/1/approve"},
+		{http.MethodPost, "/api/v1/adjustments/1/reject"},
+	}
+	for _, a := range actions {
+		rec := call(mux, a.method, a.path, reader, `{"reason":"tentativa"}`)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s %s: status = %d, want 403", a.method, a.path, rec.Code)
+		}
+	}
+	if len(dl.calls) != 0 {
+		t.Fatalf("reader must not reach the service, calls = %v", dl.calls)
 	}
 }

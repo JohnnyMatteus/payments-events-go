@@ -53,35 +53,38 @@ func NewAdminHandler(deps AdminDeps) *AdminHandler {
 
 // Register liga as rotas ao mux, todas protegidas por auth.
 func (h *AdminHandler) Register(mux *http.ServeMux, auth *OperatorAuth) {
-	route := func(pattern string, fn http.HandlerFunc) {
-		mux.Handle(pattern, auth.Middleware(fn))
+	read := func(pattern string, fn http.HandlerFunc) {
+		mux.Handle(pattern, auth.RequireRole(RoleReader, fn))
 	}
-	route("GET /api/v1/me", h.me)
-	route("GET /api/v1/events", h.listEvents)
-	route("GET /api/v1/events/{id}", h.getEvent)
-	route("GET /api/v1/balances/merchants", h.merchantBalances)
-	route("GET /api/v1/balances/payments", h.paymentBalances)
-	route("GET /api/v1/pipeline", h.pipeline)
-	route("GET /api/v1/dead-letters", h.listDeadLetters)
-	route("POST /api/v1/dead-letters/{source}/{id}/reprocess", h.reprocess)
-	route("POST /api/v1/dead-letters/{source}/{id}/discard", h.discard)
-	route("GET /api/v1/statements", h.listStatements)
-	route("PUT /api/v1/statements/{date}", h.uploadStatement)
-	route("GET /api/v1/reconciliation/runs", h.listRuns)
-	route("POST /api/v1/reconciliation/runs", h.startRun)
-	route("GET /api/v1/reconciliation/runs/latest", h.latestRun)
-	route("GET /api/v1/reconciliation/runs/{id}/items", h.runItems)
-	route("GET /api/v1/cases", h.listCases)
-	route("GET /api/v1/cases/{id}", h.getCase)
-	route("POST /api/v1/cases/{id}/explain", h.explainCase)
-	route("POST /api/v1/cases/{id}/adjustments", h.proposeAdjustment)
-	route("GET /api/v1/adjustments", h.pendingAdjustments)
-	route("POST /api/v1/adjustments/{id}/approve", h.approveAdjustment)
-	route("POST /api/v1/adjustments/{id}/reject", h.rejectAdjustment)
+	act := func(pattern string, fn http.HandlerFunc) {
+		mux.Handle(pattern, auth.RequireRole(RoleOperator, fn))
+	}
+	read("GET /api/v1/me", h.me)
+	read("GET /api/v1/events", h.listEvents)
+	read("GET /api/v1/events/{id}", h.getEvent)
+	read("GET /api/v1/balances/merchants", h.merchantBalances)
+	read("GET /api/v1/balances/payments", h.paymentBalances)
+	read("GET /api/v1/pipeline", h.pipeline)
+	read("GET /api/v1/dead-letters", h.listDeadLetters)
+	act("POST /api/v1/dead-letters/{source}/{id}/reprocess", h.reprocess)
+	act("POST /api/v1/dead-letters/{source}/{id}/discard", h.discard)
+	read("GET /api/v1/statements", h.listStatements)
+	act("PUT /api/v1/statements/{date}", h.uploadStatement)
+	read("GET /api/v1/reconciliation/runs", h.listRuns)
+	act("POST /api/v1/reconciliation/runs", h.startRun)
+	read("GET /api/v1/reconciliation/runs/latest", h.latestRun)
+	read("GET /api/v1/reconciliation/runs/{id}/items", h.runItems)
+	read("GET /api/v1/cases", h.listCases)
+	read("GET /api/v1/cases/{id}", h.getCase)
+	act("POST /api/v1/cases/{id}/explain", h.explainCase)
+	act("POST /api/v1/cases/{id}/adjustments", h.proposeAdjustment)
+	read("GET /api/v1/adjustments", h.pendingAdjustments)
+	act("POST /api/v1/adjustments/{id}/approve", h.approveAdjustment)
+	act("POST /api/v1/adjustments/{id}/reject", h.rejectAdjustment)
 }
 
 func (h *AdminHandler) me(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"operator": OperatorFrom(r.Context())})
+	writeJSON(w, http.StatusOK, map[string]string{"operator": OperatorFrom(r.Context()), "role": string(RoleFrom(r.Context()))})
 }
 
 func (h *AdminHandler) listEvents(w http.ResponseWriter, r *http.Request) {

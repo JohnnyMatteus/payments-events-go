@@ -90,7 +90,7 @@ As portas evitam colisão com os outros projetos do portfólio e podem ser troca
 
 ## Interface (Razão)
 
-Painel em `web/` (Vue 3, Vuetify 3, TanStack Query, TypeScript estrito) com a identidade **Razão**: o livro-razão aberto, extrato do provedor de um lado e ledger do outro. Sobe com o núcleo (`make up`) em http://localhost:8086; entre com `dev-token-ana` ou `dev-token-bruno` (dois operadores, para exercitar a aprovação com quatro olhos, [ADR 0011](docs/adr/0011-autenticacao-de-operador-e-quatro-olhos.md)).
+Painel em `web/` (Vue 3, Vuetify 3, TanStack Query, TypeScript estrito) com a identidade **Razão**: o livro-razão aberto, extrato do provedor de um lado e ledger do outro. Sobe com o núcleo (`make up`) em http://localhost:8086; entre com `dev-token-ana` ou `dev-token-bruno` (papel `operador`, dois para exercitar a aprovação com quatro olhos) ou `dev-token-carla` (papel `leitor`, só consulta; [ADR 0011](docs/adr/0011-autenticacao-de-operador-e-quatro-olhos.md)).
 
 | Tela | O que faz |
 | --- | --- |
@@ -103,7 +103,7 @@ Uma faixa fixa mostra a saúde do pipeline (outbox pendente e mais antigo, publi
 
 ### API de operação
 
-`/api/v1` (token `Authorization: Bearer`): `GET /events`, `/events/{id}`, `/balances/merchants`, `/balances/payments`, `/pipeline`, `/dead-letters`, `POST /dead-letters/{broker|outbox}/{id}/reprocess|discard`, `GET|PUT /statements`, `GET|POST /reconciliation/runs`, `GET /reconciliation/runs/{id}/items`, `GET /cases`, `POST /cases/{id}/explain|adjustments`, `GET /adjustments`, `POST /adjustments/{id}/approve|reject`. Erros em `application/problem+json`. Sem `OPERATOR_TOKENS`, a API de operação fica desligada.
+`/api/v1` (token `Authorization: Bearer`; ações de escrita exigem o papel `operador`, o `leitor` recebe 403): `GET /events`, `/events/{id}`, `/balances/merchants`, `/balances/payments`, `/pipeline`, `/dead-letters`, `POST /dead-letters/{broker|outbox}/{id}/reprocess|discard`, `GET|PUT /statements`, `GET|POST /reconciliation/runs`, `GET /reconciliation/runs/{id}/items`, `GET /cases`, `POST /cases/{id}/explain|adjustments`, `GET /adjustments`, `POST /adjustments/{id}/approve|reject`. Erros em `application/problem+json`. Sem `OPERATOR_TOKENS`, a API de operação fica desligada.
 
 ## Como testar
 

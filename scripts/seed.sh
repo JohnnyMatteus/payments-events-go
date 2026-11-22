@@ -27,4 +27,4 @@ docker compose --profile core cp testdata/statements/2026-11-20.csv localstack:/
 docker compose --profile core exec -T localstack \
   awslocal s3 cp /tmp/2026-11-20.csv s3://pagafacil-statements/settlements/2026-11-20.csv
 
-echo "==> pronto. Abra o painel (WEB_PORT) com o token dev-token-ana ou dev-token-bruno, ou rode: make reconcile"
+echo "==> pronto. Abra o painel (WEB_PORT) com o token dev-token-ana ou dev-token-bruno (operadores) ou dev-token-carla (leitor), ou rode: make reconcile"

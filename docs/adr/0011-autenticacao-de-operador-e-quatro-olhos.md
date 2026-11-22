@@ -12,10 +12,15 @@ identificada na trilha de auditoria, e a aprovação de um ajuste não pode ser 
 ## Decisão
 
 - Toda rota `/api/v1` exige `Authorization: Bearer <token>`. O token identifica um operador; o nome do operador vem da
-  configuração `OPERATOR_TOKENS` (`operador:token,...`), nunca do corpo da requisição.
+  configuração `OPERATOR_TOKENS` (`operador:papel:token,...`), nunca do corpo da requisição.
 - Os tokens são guardados na memória como SHA-256 e comparados em tempo constante; token com menos de 8 caracteres ou
   operador repetido derruba a inicialização. Sem `OPERATOR_TOKENS`, as rotas não são registradas (a API de operação
   fica desligada em vez de aberta).
+- Papéis: `leitor` só consulta (rotas `GET`); `operador` também reprocessa, descarta, executa a conciliação, envia
+  extrato, justifica, propõe, aprova e recusa. Cada token tem um papel, declarado em `OPERATOR_TOKENS`; papel ausente ou
+  desconhecido derruba a inicialização. A API responde 403 (`application/problem+json`) quando o `leitor` tenta uma
+  ação, antes de qualquer caso de uso, e `GET /api/v1/me` devolve o papel para o painel esconder as ações do leitor
+  (a barreira real é a API, o painel só evita botões que dariam erro).
 - Quatro olhos: o ajuste proposto por um operador só é aprovado por outro (comparação sem diferenciar maiúsculas). A
   regra mora no domínio (`CanApprove`) e é executada dentro da transação que trava o ajuste, então duas aprovações
   concorrentes não passam. O ajuste aprovado vira um lançamento novo (`kind = adjustment`) com mensagem no outbox; o
@@ -27,9 +32,9 @@ identificada na trilha de auditoria, e a aprovação de um ajuste não pode ser 
 ## Consequências
 
 - Simples de rodar localmente e de testar; os tokens de exemplo são `dev-only`.
-- Não há papéis (leitura x ação), expiração nem revogação: quem tem o token faz tudo.
+- Dois papéis fixos, sem expiração nem revogação de token; aprovar exige o papel `operador` além de ser outra pessoa.
 - Em produção, a autenticação deve ficar num gateway OIDC (por exemplo o Keycloak do restante do portfólio) que valida
-  o JWT e repassa a identidade; o adaptador `OperatorAuth` é a única peça a trocar, porque o `app` só recebe o nome do
+  o JWT e repassa a identidade e o papel (claim); o adaptador `OperatorAuth` é a única peça a trocar, porque o `app` só recebe o nome do
   operador.
 
 ## Alternativas
