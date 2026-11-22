@@ -43,6 +43,15 @@ Não usamos Specification nem Chain of Responsibility: as validações do evento
   passar (fail-open): recusar pagamentos legítimos custa mais que perder o limite por alguns minutos. Trade-off da
   janela fixa: permite até 2× o limite na virada da janela; sliding window seria mais preciso e mais caro.
 
+## Autorização no caso de uso
+
+- **Authenticator (porta de entrada) + Authorize (caso de uso)**
+  ([`httpapi.Authenticator`](../../internal/adapter/httpapi/auth.go),
+  [`app.Authorize`](../../internal/app/actor.go)): token de dev e OIDC
+  ([`oidcauth`](../../internal/adapter/oidcauth/oidcauth.go)) só produzem um `app.Actor`; quem decide a permissão é
+  o caso de uso, falhando fechado. Trocar o mecanismo de login não muda nenhuma regra, e um ponto de entrada novo
+  não consegue esquecer a checagem. Custo: o contexto carrega o ator (valor implícito), e o teste precisa montá-lo.
+
 ## SOLID
 
 | Princípio | Onde | O que ganha | Custo |

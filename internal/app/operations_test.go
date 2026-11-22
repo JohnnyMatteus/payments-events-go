@@ -34,16 +34,16 @@ func (f *fakeDeadLetters) Discard(_ context.Context, _ DeadLetterSource, _ int64
 func TestDeadLetterServiceRequiresReason(t *testing.T) {
 	repo := &fakeDeadLetters{}
 	svc := NewDeadLetterService(repo)
-	if err := svc.Reprocess(t.Context(), SourceBroker, 1, "ana", "  "); !errors.Is(err, domain.ErrReasonRequired) {
+	if err := svc.Reprocess(asOperator(t, "ana"), SourceBroker, 1, "  "); !errors.Is(err, domain.ErrReasonRequired) {
 		t.Fatalf("Reprocess without reason = %v, want ErrReasonRequired", err)
 	}
-	if err := svc.Discard(t.Context(), SourceBroker, 1, "ana", ""); !errors.Is(err, domain.ErrReasonRequired) {
+	if err := svc.Discard(asOperator(t, "ana"), SourceBroker, 1, ""); !errors.Is(err, domain.ErrReasonRequired) {
 		t.Fatalf("Discard without reason = %v, want ErrReasonRequired", err)
 	}
 	if len(repo.requeued)+len(repo.discarded) != 0 {
 		t.Fatal("repository must not be called without a reason")
 	}
-	if err := svc.Reprocess(t.Context(), SourceBroker, 1, "ana", " banco voltou "); err != nil {
+	if err := svc.Reprocess(asOperator(t, "ana"), SourceBroker, 1, " banco voltou "); err != nil {
 		t.Fatalf("Reprocess: %v", err)
 	}
 	if got := repo.requeued; len(got) != 1 || got[0] != "ana:banco voltou" {
@@ -126,7 +126,7 @@ func mismatchCase() Case {
 func TestCaseServiceFourEyes(t *testing.T) {
 	repo := &fakeCases{c: mismatchCase()}
 	svc := NewCaseService(repo)
-	adj, err := svc.ProposeAdjustment(t.Context(), 3, "ana", "provedor cobrou taxa")
+	adj, err := svc.ProposeAdjustment(asOperator(t, "ana"), 3, "provedor cobrou taxa")
 	if err != nil {
 		t.Fatalf("ProposeAdjustment: %v", err)
 	}
@@ -134,13 +134,13 @@ func TestCaseServiceFourEyes(t *testing.T) {
 	if adj.Entry.Direction != domain.Debit || adj.Entry.AmountCents != 500 || adj.Entry.AdjustsTransactionID != "tx2" {
 		t.Fatalf("adjustment entry = %+v", adj.Entry)
 	}
-	if _, err := svc.ApproveAdjustment(t.Context(), 7, "ANA", ""); !errors.Is(err, domain.ErrSameOperator) {
+	if _, err := svc.ApproveAdjustment(asOperator(t, "ANA"), 7, ""); !errors.Is(err, domain.ErrSameOperator) {
 		t.Fatalf("self approval = %v, want ErrSameOperator", err)
 	}
-	if _, err := svc.ApproveAdjustment(t.Context(), 7, "bruno", "ok"); err != nil {
+	if _, err := svc.ApproveAdjustment(asOperator(t, "bruno"), 7, "ok"); err != nil {
 		t.Fatalf("approval by another operator: %v", err)
 	}
-	if _, err := svc.ApproveAdjustment(t.Context(), 7, "carla", ""); !errors.Is(err, domain.ErrAdjustmentClosed) {
+	if _, err := svc.ApproveAdjustment(asOperator(t, "carla"), 7, ""); !errors.Is(err, domain.ErrAdjustmentClosed) {
 		t.Fatalf("second approval = %v, want ErrAdjustmentClosed", err)
 	}
 }
@@ -148,13 +148,13 @@ func TestCaseServiceFourEyes(t *testing.T) {
 func TestCaseServiceExplainNeedsOpenCaseAndReason(t *testing.T) {
 	repo := &fakeCases{c: mismatchCase()}
 	svc := NewCaseService(repo)
-	if err := svc.Explain(t.Context(), 3, "ana", ""); !errors.Is(err, domain.ErrReasonRequired) {
+	if err := svc.Explain(asOperator(t, "ana"), 3, ""); !errors.Is(err, domain.ErrReasonRequired) {
 		t.Fatalf("Explain without reason = %v", err)
 	}
-	if err := svc.Explain(t.Context(), 3, "ana", "liquida amanhã"); err != nil {
+	if err := svc.Explain(asOperator(t, "ana"), 3, "liquida amanhã"); err != nil {
 		t.Fatalf("Explain: %v", err)
 	}
-	if err := svc.Explain(t.Context(), 3, "ana", "de novo"); !errors.Is(err, domain.ErrCaseNotOpen) {
+	if err := svc.Explain(asOperator(t, "ana"), 3, "de novo"); !errors.Is(err, domain.ErrCaseNotOpen) {
 		t.Fatalf("Explain on closed case = %v, want ErrCaseNotOpen", err)
 	}
 }
@@ -192,5 +192,52 @@ func TestSettlementKeyRoundTrip(t *testing.T) {
 		if _, ok := SettlementDateFromKey(bad); ok {
 			t.Errorf("%q must be rejected", bad)
 		}
+	}
+}
+
+func asOperator(t *testing.T, name string) context.Context {
+	t.Helper()
+	return WithActor(t.Context(), Actor{Name: name, Role: RoleOperator})
+}
+
+// Guardrail de autorização: nenhuma ação que mexe com dinheiro acontece sem
+// operador autenticado, e o leitor só consulta. O repositório nunca é tocado.
+func TestMutationsFailClosedWithoutOperatorRole(t *testing.T) {
+	reader := WithActor(t.Context(), Actor{Name: "carla", Role: RoleReader})
+	unknown := WithActor(t.Context(), Actor{Name: "x", Role: Role("admin")})
+	nameless := WithActor(t.Context(), Actor{Role: RoleOperator})
+	cases := map[string]struct {
+		ctx  context.Context
+		want error
+	}{
+		"sem ator":           {t.Context(), ErrUnauthenticated},
+		"ator sem nome":      {nameless, ErrUnauthenticated},
+		"leitor":             {reader, ErrForbidden},
+		"papel desconhecido": {unknown, ErrForbidden},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			dl := &fakeDeadLetters{}
+			cs := &fakeCases{c: mismatchCase()}
+			dls, css := NewDeadLetterService(dl), NewCaseService(cs)
+			errs := map[string]error{
+				"reprocess": dls.Reprocess(tc.ctx, SourceBroker, 1, "motivo"),
+				"discard":   dls.Discard(tc.ctx, SourceBroker, 1, "motivo"),
+				"explain":   css.Explain(tc.ctx, 3, "motivo"),
+			}
+			_, errs["propose"] = css.ProposeAdjustment(tc.ctx, 3, "motivo")
+			_, errs["approve"] = css.ApproveAdjustment(tc.ctx, 7, "ok")
+			_, errs["reject"] = css.RejectAdjustment(tc.ctx, 7, "motivo")
+			_, _, errs["upload"] = NewStatementService(nil, nil).Upload(tc.ctx, time.Now(), nil)
+			_, errs["run"] = (&ReconciliationRunner{}).Run(tc.ctx, time.Now(), TriggerManual, "x")
+			for action, err := range errs {
+				if !errors.Is(err, tc.want) {
+					t.Errorf("%s = %v, want %v", action, err, tc.want)
+				}
+			}
+			if len(dl.requeued)+len(dl.discarded) != 0 || cs.adj.ID != 0 || cs.c.Status != domain.CaseOpen {
+				t.Fatal("repository must not be called")
+			}
+		})
 	}
 }

@@ -4,6 +4,7 @@ import { useStorage } from '@vueuse/core';
 import { watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useTheme } from 'vuetify';
+import { oidcEnabled, logout as oidcLogout } from '@/auth/oidc';
 import { operator, role, setToken, token } from '@/auth/session';
 import { useMe } from '@/api/queries';
 import PipelineStrip from '@/components/PipelineStrip.vue';
@@ -43,7 +44,8 @@ const tabs = [
 const isActive = (to: string) => route.path === to || route.path.startsWith(`${to}/`);
 
 function logout() {
-  setToken(null);
+  if (oidcEnabled()) void oidcLogout();
+  else setToken(null);
 }
 </script>
 

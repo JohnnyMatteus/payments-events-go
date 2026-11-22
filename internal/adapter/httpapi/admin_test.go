@@ -142,6 +142,8 @@ func TestReaderRoleCanQueryButNotAct(t *testing.T) {
 	mux := newTestMux(t, AdminDeps{
 		Reader: stubReader{}, DeadLetters: app.NewDeadLetterService(dl),
 		CaseService: app.NewCaseService(cases), Cases: cases,
+		// Stores nulos: se a barreira falhar, o teste quebra em vez de gravar.
+		Statements: app.NewStatementService(nil, nil), Runner: app.NewReconciliationRunner(nil, nil, nil, nil),
 	})
 	reader := "token-da-carla"
 	if rec := call(mux, http.MethodGet, "/api/v1/dead-letters", reader, ""); rec.Code != http.StatusOK {
@@ -150,18 +152,22 @@ func TestReaderRoleCanQueryButNotAct(t *testing.T) {
 	if rec := call(mux, http.MethodGet, "/api/v1/me", reader, ""); !bytes.Contains(rec.Body.Bytes(), []byte(`"role":"leitor"`)) {
 		t.Fatalf("me = %s", rec.Body)
 	}
-	actions := []struct{ method, path string }{
-		{http.MethodPost, "/api/v1/dead-letters/broker/4/reprocess"},
-		{http.MethodPost, "/api/v1/dead-letters/broker/4/discard"},
-		{http.MethodPut, "/api/v1/statements/2026-11-20"},
-		{http.MethodPost, "/api/v1/reconciliation/runs"},
-		{http.MethodPost, "/api/v1/cases/1/explain"},
-		{http.MethodPost, "/api/v1/cases/1/adjustments"},
-		{http.MethodPost, "/api/v1/adjustments/1/approve"},
-		{http.MethodPost, "/api/v1/adjustments/1/reject"},
+	actions := []struct{ method, path, body string }{
+		{http.MethodPost, "/api/v1/dead-letters/broker/4/reprocess", ""},
+		{http.MethodPost, "/api/v1/dead-letters/broker/4/discard", ""},
+		{http.MethodPut, "/api/v1/statements/2026-11-20", ""},
+		{http.MethodPost, "/api/v1/reconciliation/runs", `{"date":"2026-11-20"}`},
+		{http.MethodPost, "/api/v1/cases/1/explain", ""},
+		{http.MethodPost, "/api/v1/cases/1/adjustments", ""},
+		{http.MethodPost, "/api/v1/adjustments/1/approve", ""},
+		{http.MethodPost, "/api/v1/adjustments/1/reject", ""},
 	}
 	for _, a := range actions {
-		rec := call(mux, a.method, a.path, reader, `{"reason":"tentativa"}`)
+		body := a.body
+		if body == "" {
+			body = `{"reason":"tentativa"}`
+		}
+		rec := call(mux, a.method, a.path, reader, body)
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("%s %s: status = %d, want 403", a.method, a.path, rec.Code)
 		}

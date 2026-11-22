@@ -52,13 +52,15 @@ func NewAdminHandler(deps AdminDeps) *AdminHandler {
 }
 
 // Register liga as rotas ao mux, todas protegidas por auth.
-func (h *AdminHandler) Register(mux *http.ServeMux, auth *OperatorAuth) {
+//
+// O middleware só autentica. Consultar é permitido a qualquer papel conhecido;
+// toda ação que muda estado passa por um caso de uso que exige o papel
+// operador (app.Authorize), então a barreira não depende destas rotas.
+func (h *AdminHandler) Register(mux *http.ServeMux, auth Authenticator) {
 	read := func(pattern string, fn http.HandlerFunc) {
-		mux.Handle(pattern, auth.RequireRole(RoleReader, fn))
+		mux.Handle(pattern, Authenticated(auth, fn))
 	}
-	act := func(pattern string, fn http.HandlerFunc) {
-		mux.Handle(pattern, auth.RequireRole(RoleOperator, fn))
-	}
+	act := read
 	read("GET /api/v1/me", h.me)
 	read("GET /api/v1/events", h.listEvents)
 	read("GET /api/v1/events/{id}", h.getEvent)
@@ -178,7 +180,7 @@ func (h *AdminHandler) discard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) deadLetterAction(w http.ResponseWriter, r *http.Request,
-	act func(context.Context, app.DeadLetterSource, int64, string, string) error) {
+	act func(context.Context, app.DeadLetterSource, int64, string) error) {
 	id, err := idParam(r)
 	if err != nil {
 		h.fail(w, r, err)
@@ -189,7 +191,7 @@ func (h *AdminHandler) deadLetterAction(w http.ResponseWriter, r *http.Request,
 		h.fail(w, r, err)
 		return
 	}
-	if err := act(r.Context(), app.DeadLetterSource(r.PathValue("source")), id, OperatorFrom(r.Context()), body.Reason); err != nil {
+	if err := act(r.Context(), app.DeadLetterSource(r.PathValue("source")), id, body.Reason); err != nil {
 		h.fail(w, r, err)
 		return
 	}
@@ -325,7 +327,7 @@ func (h *AdminHandler) explainCase(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.CaseService.Explain(r.Context(), id, OperatorFrom(r.Context()), body.Reason); err != nil {
+	if err := h.CaseService.Explain(r.Context(), id, body.Reason); err != nil {
 		h.fail(w, r, err)
 		return
 	}
@@ -337,7 +339,7 @@ func (h *AdminHandler) proposeAdjustment(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	if _, err := h.CaseService.ProposeAdjustment(r.Context(), id, OperatorFrom(r.Context()), body.Reason); err != nil {
+	if _, err := h.CaseService.ProposeAdjustment(r.Context(), id, body.Reason); err != nil {
 		h.fail(w, r, err)
 		return
 	}
@@ -358,7 +360,7 @@ func (h *AdminHandler) approveAdjustment(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	a, err := h.CaseService.ApproveAdjustment(r.Context(), id, OperatorFrom(r.Context()), body.Reason)
+	a, err := h.CaseService.ApproveAdjustment(r.Context(), id, body.Reason)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -371,7 +373,7 @@ func (h *AdminHandler) rejectAdjustment(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	a, err := h.CaseService.RejectAdjustment(r.Context(), id, OperatorFrom(r.Context()), body.Reason)
+	a, err := h.CaseService.RejectAdjustment(r.Context(), id, body.Reason)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -413,6 +415,10 @@ func (h *AdminHandler) fail(w http.ResponseWriter, r *http.Request, err error) {
 
 func classify(err error) (int, string, string) {
 	switch {
+	case errors.Is(err, app.ErrUnauthenticated):
+		return http.StatusUnauthorized, "unauthorized", "informe um token válido"
+	case errors.Is(err, app.ErrForbidden):
+		return http.StatusForbidden, "forbidden", "o papel leitor só consulta; ação exige o papel operador"
 	case errors.Is(err, app.ErrNotFound):
 		return http.StatusNotFound, "not_found", "registro não encontrado"
 	case errors.Is(err, app.ErrStatementMissing):
