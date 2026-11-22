@@ -202,6 +202,23 @@ jobs:
           ' "$RUNNER_TEMP/rendered.yaml"
           if grep -q OPERATOR_TOKENS "$RUNNER_TEMP/rendered.yaml"; then echo "token de dev no chart"; exit 1; fi
           if grep -q "^kind: HorizontalPodAutoscaler$" "$RUNNER_TEMP/minimal.yaml"; then echo "HPA com autoscaling desligado"; exit 1; fi
+          # O painel no cluster não pode cair no token de dev: sem emissor ou sem client a renderização falha.
+          if helm template demo "$chart" --set web.enabled=true --set oidc.issuerUrl=https://idp.example.com >/dev/null 2>&1; then
+            echo "web.enabled sem oidcClientId deveria falhar"; exit 1
+          fi
+          if helm template demo "$chart" --set web.enabled=true --set web.oidcClientId=c >/dev/null 2>&1; then
+            echo "web.enabled sem emissor deveria falhar"; exit 1
+          fi
+          # Com ingressFrom restrito, o painel do release continua autorizado a chamar a API.
+          helm template demo "$chart" --set web.enabled=true --set web.oidcClientId=c --set oidc.issuerUrl=https://idp.example.com \
+            --set networkPolicy.enabled=true --set-json 'networkPolicy.ingressFrom=[{"namespaceSelector":{"matchLabels":{"name":"edge"}}}]' > "$RUNNER_TEMP/netpol.yaml"
+          ruby -ryaml -e '
+            np = YAML.load_stream(File.read(ARGV[0])).compact.find { |d| d["kind"] == "NetworkPolicy" }
+            froms = np.dig("spec", "ingress", 0, "from")
+            ok = froms.any? { |f| f.dig("podSelector", "matchLabels", "app.kubernetes.io/component") == "web" }
+            abort("o painel não está na lista de origens da NetworkPolicy: #{froms.inspect}") unless ok
+            abort("ingressFrom do usuário sumiu") unless froms.any? { |f| f.key?("namespaceSelector") }
+          ' "$RUNNER_TEMP/netpol.yaml"
           # Vault sem k8sRole e provider sem referência têm de falhar a renderização.
           if helm template demo "$chart" --set secrets.provider=vault --set secrets.webhookRef=a#b --set secrets.vault.addr=https://v >/dev/null 2>&1; then
             echo "vault sem k8sRole deveria falhar"; exit 1
