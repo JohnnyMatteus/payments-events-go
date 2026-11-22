@@ -88,6 +88,8 @@ podDisruptionBudget:
 # Roda `payments migrate` antes de cada instalação/atualização (hook do Helm, que o ArgoCD trata como PreSync).
 migrate:
   enabled: true
+  # SA que já existe quando o hook roda (o ServiceAccount do chart ainda não foi criado numa instalação nova).
+  serviceAccountName: default
 
 reconcile:
   enabled: true

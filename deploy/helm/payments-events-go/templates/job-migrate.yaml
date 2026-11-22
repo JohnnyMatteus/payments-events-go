@@ -21,7 +21,21 @@ spec:
         app.kubernetes.io/component: migrate
     spec:
       restartPolicy: Never
-      {{- include "payments.podCommon" . | nindent 6 }}
+      # O ServiceAccount do chart é um recurso comum e só nasce depois dos hooks pre-install,
+      # então o Job usa uma SA que já existe (a default do namespace), sem token. Só o login no
+      # Vault por Kubernetes para a senha do banco precisa de token: nesse caso, informe em
+      # migrate.serviceAccountName uma SA pré-existente com o papel no Vault.
+      {{- $needsToken := and (eq .Values.secrets.provider "vault") .Values.secrets.databasePasswordRef }}
+      {{- if and $needsToken (eq .Values.migrate.serviceAccountName "default") }}
+      {{- fail "com secrets.provider=vault e secrets.databasePasswordRef, defina migrate.serviceAccountName (SA que já existe antes do hook e tem o papel no Vault)" }}
+      {{- end }}
+      serviceAccountName: {{ .Values.migrate.serviceAccountName }}
+      automountServiceAccountToken: {{ if $needsToken }}true{{ else }}false{{ end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- include "payments.podSecurityContext" . | nindent 6 }}
       containers:
         - name: migrate
           image: {{ include "payments.image" . }}

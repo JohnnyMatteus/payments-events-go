@@ -1,6 +1,11 @@
 # GitOps com ArgoCD: sincroniza o chart deste repositório. Ajuste repoURL,
 # destination e os valores do ambiente (oidc.issuerUrl, secrets, config.*).
 # O hook pre-install/pre-upgrade do chart (payments migrate) vira PreSync.
+#
+# Sincronização MANUAL e revisão fixada por tag, de propósito: neste repositório
+# todo feat/* verde chega sozinho à main, então `automated` com `prune` apontando
+# para a main seria deploy automático (e com remoção de recursos) de um commit
+# que nenhuma pessoa aprovou. Promover é trocar a tag e sincronizar (ADR 0017).
 # Não foi aplicado em nenhum cluster (nenhum disponível ao escrever).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -13,7 +18,8 @@ spec:
   project: default
   source:
     repoURL: https://github.com/JohnnyMatteus/payments-events-go.git
-    targetRevision: main
+    # Tag de release aprovada por uma pessoa (ex.: v0.2.0). Troque ao promover.
+    targetRevision: v0.0.0-substitua-pela-tag-aprovada
     path: deploy/helm/payments-events-go
     helm:
       releaseName: payments
@@ -28,9 +34,7 @@ spec:
     server: https://kubernetes.default.svc
     namespace: payments
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+    # Sem `automated`: a sincronização é um clique (ou `argocd app sync`) de quem aprovou a tag.
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true

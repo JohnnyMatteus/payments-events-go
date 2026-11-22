@@ -8,7 +8,7 @@ Renderiza:
 | Service da API | HTTP na 80 e, com `grpc.enabled`, gRPC (ADR 0016) |
 | HPA (API) | CPU, de `autoscaling.minReplicas` a `maxReplicas`; com ele ligado o Deployment não fixa `replicas` |
 | PodDisruptionBudget (API) | `minAvailable` |
-| Job de migração | `payments migrate`, hook `pre-install,pre-upgrade` (o ArgoCD o roda como PreSync) |
+| Job de migração | `payments migrate`, hook `pre-install,pre-upgrade` (o ArgoCD o roda como PreSync). Usa a SA `default` sem token, porque os recursos comuns do chart (ServiceAccount) ainda não existem quando o hook roda numa instalação nova; o Secret `existingSecret` também precisa existir antes |
 | CronJob de conciliação | `payments reconcile -daily -fail-on-divergence` (dia anterior, UTC) |
 | CronJob de retenção | `payments retention` (ADR 0015) |
 | NetworkPolicy (opcional) | entrada na API só de `networkPolicy.ingressFrom` |

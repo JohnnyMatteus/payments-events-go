@@ -20,3 +20,4 @@ Formato: Contexto, Decisão, Consequências e Alternativas. Um ADR por decisão;
 | [0014](0014-segredos-por-porta-e-rotacao-sem-downtime.md) | Segredos por porta (Vault e Secrets Manager) e rotação sem downtime | Aceito |
 | [0015](0015-retencao-sem-perder-idempotencia-nem-razao.md) | Retenção sem perder idempotência nem o razão (arquivar não é apagar) | Aceito |
 | [0016](0016-grpc-interno-de-saldo-autenticado.md) | gRPC interno de saldo, autenticado por token OIDC | Aceito |
+| [0017](0017-deploy-em-kubernetes-com-helm-e-argocd.md) | Deploy em Kubernetes com Helm e ArgoCD, sincronização manual e revisão por tag | Aceito |

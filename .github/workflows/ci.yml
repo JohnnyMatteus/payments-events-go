@@ -130,6 +130,20 @@ jobs:
             [ "$(grep -c "$probe:" "$RUNNER_TEMP/rendered.yaml")" -ge 4 ] || { echo "$probe ausente em algum Deployment"; exit 1; }
           done
           grep -q -- 'reconcile", "-daily"' "$RUNNER_TEMP/rendered.yaml" || { echo "CronJob de conciliação sem -daily"; exit 1; }
+          # O hook de migração não pode depender de recurso comum do chart (ServiceAccount): ele roda antes de existirem.
+          ruby -ryaml -e '
+            docs = YAML.load_stream(File.read(ARGV[0])).compact
+            hook = ->(d) { d.dig("metadata", "annotations", "helm.sh/hook") }
+            chart_sas = docs.select { |d| d["kind"] == "ServiceAccount" && !hook.(d) }.map { |d| d.dig("metadata", "name") }
+            jobs = docs.select { |d| d["kind"] == "Job" && hook.(d) }
+            abort("sem Job de hook") if jobs.empty?
+            jobs.each do |j|
+              sa = j.dig("spec", "template", "spec", "serviceAccountName")
+              abort("o hook usa a SA do chart (#{sa}), que ainda não existe na instalação nova") if chart_sas.include?(sa)
+              abort("o hook monta token de SA sem precisar") unless j.dig("spec", "template", "spec", "automountServiceAccountToken") == false
+            end
+            abort("sem ServiceAccount no render completo") if chart_sas.empty?
+          ' "$RUNNER_TEMP/rendered.yaml"
           if grep -q OPERATOR_TOKENS "$RUNNER_TEMP/rendered.yaml"; then echo "token de dev no chart"; exit 1; fi
           if grep -q "^kind: HorizontalPodAutoscaler$" "$RUNNER_TEMP/minimal.yaml"; then echo "HPA com autoscaling desligado"; exit 1; fi
           # Vault sem k8sRole e provider sem referência têm de falhar a renderização.
