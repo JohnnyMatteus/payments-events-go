@@ -19,6 +19,8 @@ func TestParseAmountCents(t *testing.T) {
 		{in: "42", want: 4200},
 		{in: " 7.07 ", want: 707},
 		{in: "0.01", want: 1},
+		{in: "0", want: 0},
+		{in: "0.00", want: 0},
 		{in: "92233720368547758.07", want: 9223372036854775807},
 		{in: "92233720368547758.08", wantErr: true},
 		{in: "", wantErr: true},
@@ -86,7 +88,13 @@ func TestParseCurrency(t *testing.T) {
 	if got, err := domain.ParseCurrency(" brl "); err != nil || got != "BRL" {
 		t.Fatalf("ParseCurrency(brl) = %q, %v", got, err)
 	}
-	for _, bad := range []string{"", "BR", "BRLL", "B1L", "R$ "} {
+	// Os limites do alfabeto: A e Z valem; os vizinhos na tabela ASCII ('@' e '[') não.
+	for _, ok := range []string{"AAA", "ZZZ", "AZA"} {
+		if got, err := domain.ParseCurrency(ok); err != nil || string(got) != ok {
+			t.Errorf("ParseCurrency(%q) = %q, %v, want valid", ok, got, err)
+		}
+	}
+	for _, bad := range []string{"", "BR", "BRLL", "B1L", "R$ ", "@AA", "AA[", "[ZZ", "ZZ@"} {
 		if _, err := domain.ParseCurrency(bad); !errors.Is(err, domain.ErrInvalidCurrency) {
 			t.Errorf("ParseCurrency(%q) err = %v, want ErrInvalidCurrency", bad, err)
 		}

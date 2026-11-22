@@ -52,6 +52,11 @@ up-secrets: ## Sobe o núcleo lendo segredos do Secrets Manager (LocalStack)
 retention: ## Aplica a política de retenção (outbox publicado, payloads antigos, arquivo do ledger)
 	$(COMPOSE) --profile core --profile tools run --rm retention
 
+.PHONY: mutation
+mutation: ## Testes de mutação no domínio (gremlins; falha abaixo de 90% de eficácia)
+	go build -C tools -o ../bin/gremlins github.com/go-gremlins/gremlins/cmd/gremlins
+	./bin/gremlins unleash ./internal/domain --workers 1 --timeout-coefficient 6 --threshold-efficacy 90 -E '_test\.go'
+
 .PHONY: proto
 proto: ## Regenera o código gRPC de api/proto (exige protoc no PATH)
 	./scripts/gen-proto.sh
