@@ -4,6 +4,7 @@ package postgres_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -196,5 +197,51 @@ func TestApproveAdjustmentTakesTheAppendLockBeforeLockingTheAdjustmentRow(t *tes
 	}
 	if count(t, "ledger_entries") != 2 {
 		t.Fatal("o ajuste aprovado devia virar lançamento")
+	}
+}
+
+// O relay é acordado por LISTEN/NOTIFY quando uma mensagem entra no outbox. O
+// NOTIFY vai na transação que grava, então só chega no commit.
+func TestOutboxNotifierWakesOnCommittedMessageOnly(t *testing.T) {
+	testinfra.ResetDatabase(t, pool)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	wake := postgres.NewOutboxNotifier(pool).Wake(ctx)
+
+	// O LISTEN é assíncrono: grava eventos novos até o primeiro sinal chegar.
+	deadline := time.After(10 * time.Second)
+	for i := 0; ; i++ {
+		ingest(t, capture(fmt.Sprintf("evt_wake_%d", i), fmt.Sprintf("txn_wake_%d", i), 100))
+		select {
+		case <-wake:
+		case <-time.After(200 * time.Millisecond):
+			select {
+			case <-deadline:
+				t.Fatal("nenhuma notificação chegou depois de gravar no outbox")
+			default:
+				continue
+			}
+		}
+		break
+	}
+
+	// Transação desfeita não avisa ninguém.
+	for len(wake) > 0 {
+		<-wake
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, "SELECT pg_notify($1, 'x')", postgres.OutboxChannel); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-wake:
+		t.Fatal("uma transação desfeita acordou o relay")
+	case <-time.After(500 * time.Millisecond):
 	}
 }

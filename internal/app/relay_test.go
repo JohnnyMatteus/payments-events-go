@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -94,5 +95,49 @@ func TestNewRelayValidatesConfig(t *testing.T) {
 	_, err := NewRelay(RelayConfig{}, &fakeOutbox{}, &fakePublisher{}, &recordingObserver{}, discardLogger())
 	if err == nil {
 		t.Fatal("expected error for zero config")
+	}
+}
+
+type countingOutbox struct{ calls atomic.Int32 }
+
+func (c *countingOutbox) ProcessDue(context.Context, time.Time, int, func(context.Context, OutboxMessage) Delivery) (int, error) {
+	c.calls.Add(1)
+	return 0, nil
+}
+
+// Com o polling longo, só a notificação do banco faz o relay tentar de novo: a
+// latência não depende do intervalo de polling.
+func TestRelayWakesOnNotificationBeforeThePollInterval(t *testing.T) {
+	t.Parallel()
+	wake := make(chan struct{}, 1)
+	outbox := &countingOutbox{}
+	relay, err := NewRelay(RelayConfig{
+		BatchSize: 10, PollInterval: time.Hour, MaxAttempts: 3,
+		Backoff: Backoff{Base: time.Second, Max: time.Minute}, Wake: wake,
+	}, outbox, &fakePublisher{}, &recordingObserver{}, discardLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- relay.Run(ctx) }()
+	waitCalls := func(want int32) {
+		t.Helper()
+		for range 200 {
+			if outbox.calls.Load() >= want {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("o relay chamou ProcessDue %d vezes, want pelo menos %d", outbox.calls.Load(), want)
+	}
+	waitCalls(1) // ciclo inicial
+	wake <- struct{}{}
+	waitCalls(2)
+	wake <- struct{}{}
+	waitCalls(3)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run = %v", err)
 	}
 }

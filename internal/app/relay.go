@@ -22,6 +22,10 @@ type RelayConfig struct {
 	PollInterval time.Duration
 	MaxAttempts  int
 	Backoff      Backoff
+	// Wake, se informado, acorda o relay antes do próximo ciclo (LISTEN/NOTIFY
+	// do banco). Não é garantia de entrega: o polling continua como rede de
+	// segurança, porque uma notificação pode se perder (reconexão, falha).
+	Wake <-chan struct{}
 }
 
 // Relay lê mensagens pendentes do outbox e as publica no broker. Falhas de
@@ -65,6 +69,7 @@ func (r *Relay) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+		case <-r.cfg.Wake:
 		}
 	}
 }

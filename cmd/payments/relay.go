@@ -71,6 +71,8 @@ func runRelay(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 		Backoff: app.Backoff{
 			Base: cfg.OutboxBackoffBase, Max: cfg.OutboxBackoffMax, Jitter: app.EqualJitter,
 		},
+		// LISTEN/NOTIFY acorda o relay na hora; o polling segue como rede de segurança.
+		Wake: postgres.NewOutboxNotifier(pool).Wake(ctx),
 	}, postgres.NewOutboxRepository(pool), publisher, metrics, logger)
 	if err != nil {
 		return err
