@@ -31,7 +31,8 @@ func runAPI(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	var ingest app.Ingester = app.NewIngestService(postgres.NewEventRecorder(pool))
+	recorder := postgres.NewEventRecorder(pool)
+	var ingest app.Ingester = app.NewIngestService(recorder)
 	var opts []httpapi.WebhookOption
 	// Sem REDIS_URL o serviço funciona igual, só sem o atalho de
 	// idempotência e sem limite por lojista (o Postgres segue como garantia).
@@ -45,7 +46,7 @@ func runAPI(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		ingest = app.NewFastPathIngest(ingest, cache, logger)
+		ingest = app.NewFastPathIngest(ingest, cache, logger).WithRedeliveryCounter(recorder)
 		opts = append(opts, httpapi.WithRateLimiter(
 			redisstore.NewFixedWindowLimiter(client, cfg.WebhookRateLimit, cfg.WebhookRateWindow)))
 	}
@@ -53,6 +54,14 @@ func runAPI(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	router := httpapi.NewRouter(webhook, tel.MetricsHandler, pool.Ping)
+	var routerOpts []httpapi.RouterOption
+	admin, err := adminOption(ctx, cfg, pool, logger)
+	if err != nil {
+		return err
+	}
+	if admin != nil {
+		routerOpts = append(routerOpts, admin)
+	}
+	router := httpapi.NewRouter(webhook, tel.MetricsHandler, pool.Ping, routerOpts...)
 	return serve(ctx, newServer(cfg.HTTPAddr, router), cfg.ShutdownTimeout, logger)
 }

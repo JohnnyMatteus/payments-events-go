@@ -75,17 +75,37 @@ Enviar um webhook à mão:
 ./scripts/send-webhook.sh evt_manual_1 payment.captured txn_manual_1 pay_manual_1 9990   # {"status":"duplicate"}
 ```
 
+Conciliação automática ([ADR 0012](docs/adr/0012-disparo-automatico-da-conciliacao.md)): o extrato depositado em `settlements/` no bucket gera uma notificação S3 → SQS que o serviço `watcher` (`payments watch`) consome, conciliando o dia uma única vez por versão do objeto. O serviço `scheduler` (crond) roda `payments reconcile --daily` todo dia às 03:00 UTC (`RECONCILE_CRON`) como rede de segurança.
+
 Outros alvos: `make up-observability` (Jaeger em http://localhost:16687 e Prometheus em http://localhost:9095), `make ps`, `make logs`, `make down`, `make clean`, `make help`. Para ligar a API à rede compartilhada do ecossistema: `make up-portfolio`.
 
 | Serviço | Endereço local |
 | --- | --- |
-| API (webhook, `/metrics`, `/healthz`, `/readyz`) | http://localhost:8085 |
+| API (webhook, `/api/v1`, `/metrics`, `/healthz`, `/readyz`) | http://localhost:8085 |
+| Painel Razão | http://localhost:8086 |
 | RabbitMQ UI | http://localhost:15673 |
 | PostgreSQL | localhost:5434 |
-| LocalStack (S3) | http://localhost:4567 |
+| LocalStack (S3 e SQS) | http://localhost:4567 |
 | Redis | localhost:6381 |
 
 As portas evitam colisão com os outros projetos do portfólio e podem ser trocadas no `.env`.
+
+## Interface (Razão)
+
+Painel em `web/` (Vue 3, Vuetify 3, TanStack Query, TypeScript estrito) com a identidade **Razão**: o livro-razão aberto, extrato do provedor de um lado e ledger do outro. Sobe com o núcleo (`make up`) em http://localhost:8086; entre com `dev-token-ana` ou `dev-token-bruno` (papel `operador`, dois para exercitar a aprovação com quatro olhos) ou `dev-token-carla` (papel `leitor`, só consulta; [ADR 0011](docs/adr/0011-autenticacao-de-operador-e-quatro-olhos.md)).
+
+| Tela | O que faz |
+| --- | --- |
+| Conciliação | Partida dobrada extrato × ledger com a calha de delta (par ligado, lacuna pontilhada, traço quebrado com o delta), cascata do dia, envio do extrato, execução, filtros e busca. Cada divergência é um caso com estado (aberta, ajuste proposto, justificada, resolvida): justificar com motivo, propor ajuste e aprovar/recusar por outra pessoa. |
+| Eventos | Tabela densa com busca (evento, transação, pagamento, lojista) e filtros; o detalhe segue o evento por webhook → ledger → outbox → consumidor, com o payload assinado. |
+| DLQ | Mensagens agrupadas por motivo, idade em âmbar crescente, histograma por faixa de idade, reprocessar (confirmação digitada e motivo) e descartar com motivo, em lote. |
+| Saldos | Líquido por lojista no ledger × projeção do consumidor, com as mensagens ainda por consumir, e detalhe por pagamento. |
+
+Uma faixa fixa mostra a saúde do pipeline (outbox pendente e mais antigo, publicações por minuto, último consumo, DLQ aberta). Gráficos são SVG próprio (cascata e histograma), sem biblioteca, para ter rótulos com o valor exato e a estética de relatório impresso. Rodar em desenvolvimento: `make web-dev`. Verificação: `make web-check`.
+
+### API de operação
+
+`/api/v1` (token `Authorization: Bearer`; ações de escrita exigem o papel `operador`, o `leitor` recebe 403): `GET /events`, `/events/{id}`, `/balances/merchants`, `/balances/payments`, `/pipeline`, `/dead-letters`, `POST /dead-letters/{broker|outbox}/{id}/reprocess|discard`, `GET|PUT /statements`, `GET|POST /reconciliation/runs`, `GET /reconciliation/runs/{id}/items`, `GET /cases`, `POST /cases/{id}/explain|adjustments`, `GET /adjustments`, `POST /adjustments/{id}/approve|reject`. Erros em `application/problem+json`. Sem `OPERATOR_TOKENS`, a API de operação fica desligada.
 
 ## Como testar
 
@@ -132,6 +152,8 @@ LocalStack, o relatório de conciliação (faltando, sobrando e valor divergente
 | OpenTelemetry (traces OTLP e métricas Prometheus) e slog | [0008](docs/adr/0008-observabilidade-opentelemetry.md) |
 | Testes de integração com testcontainers sob build tag | [0009](docs/adr/0009-testes-de-integracao-com-testcontainers.md) |
 | Redis como atalho de idempotência (o Postgres segue como garantia) e limite por lojista, fail-open | [0010](docs/adr/0010-redis-atalho-de-idempotencia-e-rate-limit.md) |
+| Painel de operação: token por operador com papel (leitor ou operador) e ajustes de ledger com aprovação de outra pessoa | [0011](docs/adr/0011-autenticacao-de-operador-e-quatro-olhos.md) |
+| Conciliação disparada por notificação S3 → SQS (idempotente por versão do objeto) e agenda diária por cron | [0012](docs/adr/0012-disparo-automatico-da-conciliacao.md) |
 
 Padrões de projeto e SOLID com os trechos reais do código: [docs/arquitetura/padroes.md](docs/arquitetura/padroes.md).
 
@@ -148,12 +170,13 @@ Para defender o núcleo numa entrevista: [roteiro de idempotência](docs/roteiro
 
 ## Próximos passos
 
-- Validar no CI o que não foi exercitado localmente nesta rodada (Docker local saturado): `docker build` da imagem final, subida completa do `docker-compose` com `make up && make seed && make reconcile` e a suíte `make test-integration` com o LocalStack e o teste ponta a ponta na versão final.
+- Validar no CI o que não foi exercitado localmente nesta rodada (Docker local com erro de I/O): os testes de integração da API de operação (`operations_integration_test.go`), o build da imagem do painel e `docker build` da imagem final, subida completa do `docker-compose` com `make up && make seed && make reconcile` e a suíte `make test-integration` com o LocalStack e o teste ponta a ponta na versão final.
 - Helm chart e manifests Kubernetes (Deployments, CronJob de conciliação, HPA, probes) e GitOps com ArgoCD.
-- Segredos do webhook no Secrets Manager/Vault e notificação S3 → SQS para disparar a conciliação.
+- Segredos do webhook no Secrets Manager/Vault.
 - Retenção e particionamento de `processed_events` e `ledger_entries`; limpeza do outbox publicado.
-- Casos de divergência com estado e lançamentos de ajuste com aprovação humana.
-- API de consulta de saldo (REST com paginação por cursor) e gRPC interno.
+- Autenticação de operador por OIDC (hoje token por operador com papel `leitor` ou `operador`, ADR 0011).
+- gRPC interno para consulta de saldo.
+- Screenshots do painel em `docs/screenshots/` e vídeo de evidência pelos front-ends (adiados nesta rodada).
 - SBOM, assinatura da imagem e Trivy no CI; testes de carga com k6.
 
 ## Licença

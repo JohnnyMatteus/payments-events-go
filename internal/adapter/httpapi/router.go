@@ -19,12 +19,23 @@ type ReadinessCheck func(ctx context.Context) error
 // do OpenTelemetry, que cria o span do servidor (continuando um traceparent
 // recebido) e a métrica de duração HTTP. Health e métricas ficam fora do
 // tracing para não poluir os traces.
-func NewRouter(webhook http.Handler, metrics http.Handler, ready ReadinessCheck) http.Handler {
+func NewRouter(webhook http.Handler, metrics http.Handler, ready ReadinessCheck, opts ...RouterOption) http.Handler {
 	mux := http.NewServeMux()
+	for _, opt := range opts {
+		opt(mux)
+	}
 	route := "POST " + WebhookPath
 	mux.Handle(route, otelhttp.NewHandler(webhook, route))
 	registerOps(mux, metrics, ready)
 	return mux
+}
+
+// RouterOption acrescenta rotas ao serviço de API.
+type RouterOption func(*http.ServeMux)
+
+// WithAdmin liga a API de operação (/api/v1), protegida por token de operador.
+func WithAdmin(admin *AdminHandler, auth *OperatorAuth) RouterOption {
+	return func(mux *http.ServeMux) { admin.Register(mux, auth) }
 }
 
 // NewOpsRouter expõe só health e métricas, para os processos sem API

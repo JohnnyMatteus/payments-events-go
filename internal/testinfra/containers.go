@@ -123,11 +123,11 @@ func StartRabbitMQ(ctx context.Context) (string, func(), error) {
 	return url, terminate, nil
 }
 
-// StartLocalStack sobe o LocalStack só com S3 e devolve o endpoint HTTP.
+// StartLocalStack sobe o LocalStack com S3 e SQS e devolve o endpoint HTTP.
 // As credenciais de teste ("test"/"test") são exportadas para o SDK da AWS.
 func StartLocalStack(ctx context.Context) (string, func(), error) {
 	ctr, err := tclocalstack.Run(ctx, LocalStackImage,
-		testcontainers.WithEnv(map[string]string{"SERVICES": "s3"}),
+		testcontainers.WithEnv(map[string]string{"SERVICES": "s3,sqs"}),
 		testcontainers.WithWaitStrategyAndDeadline(startupTimeout,
 			wait.ForHTTP("/_localstack/health").WithPort("4566/tcp").WithStartupTimeout(startupTimeout),
 		),
@@ -159,7 +159,8 @@ func StartLocalStack(ctx context.Context) (string, func(), error) {
 func ResetDatabase(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `TRUNCATE processed_events, ledger_entries, outbox_messages,
-		consumed_messages, payment_balances RESTART IDENTITY CASCADE`)
+		consumed_messages, payment_balances, dead_letters, reconciliation_runs, reconciliation_items,
+		divergence_cases, ledger_adjustments, statement_object_claims RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("reset database: %v", err)
 	}

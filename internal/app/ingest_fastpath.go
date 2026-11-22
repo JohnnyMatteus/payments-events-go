@@ -24,6 +24,19 @@ type FastPathIngest struct {
 	next   Ingester
 	cache  IdempotencyCache
 	logger *slog.Logger
+	counts RedeliveryCounter
+}
+
+// RedeliveryCounter registra reentregas respondidas pelo atalho, para a
+// operação ver quantas vezes o provedor insistiu num evento.
+type RedeliveryCounter interface {
+	CountRedelivery(ctx context.Context, eventID string) error
+}
+
+// WithRedeliveryCounter liga a contagem de reentregas.
+func (f *FastPathIngest) WithRedeliveryCounter(c RedeliveryCounter) *FastPathIngest {
+	f.counts = c
+	return f
 }
 
 // NewFastPathIngest cria o decorator.
@@ -41,6 +54,12 @@ func (f *FastPathIngest) Ingest(ctx context.Context, ev domain.Event, raw []byte
 	}
 	switch state {
 	case ClaimDone:
+		if f.counts != nil {
+			if err := f.counts.CountRedelivery(ctx, ev.ID); err != nil {
+				f.logger.WarnContext(ctx, "redelivery count failed",
+					slog.String("event_id", ev.ID), slog.Any("error", err))
+			}
+		}
 		return OutcomeDuplicate, nil
 	case ClaimInFlight:
 		return f.next.Ingest(ctx, ev, raw)

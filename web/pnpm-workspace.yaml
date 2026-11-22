@@ -1,0 +1,5 @@
+# Workspace próprio: o painel não faz parte do workspace do Go.
+# vue-demi (dependência do vueuse/vue-query) roda um postinstall que escolhe a build do Vue.
+allowBuilds:
+  esbuild: true
+  vue-demi: true

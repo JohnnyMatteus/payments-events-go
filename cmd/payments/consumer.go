@@ -46,5 +46,9 @@ func runConsumer(ctx context.Context, cfg config.Config, logger *slog.Logger) er
 		return serve(gctx, newServer(cfg.OpsAddr, ops), cfg.ShutdownTimeout, logger)
 	})
 	g.Go(func() error { return consumer.Run(gctx, projector.Handle) })
+	archiver := app.NewDeadLetterArchiver(postgres.NewDeadLetterRepository(pool))
+	g.Go(func() error {
+		return rabbitmq.NewDeadLetterConsumer(cfg.RabbitMQURL, topology, logger).Run(gctx, archiver.Archive)
+	})
 	return g.Wait()
 }

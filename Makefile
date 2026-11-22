@@ -67,6 +67,16 @@ clean: ## Remove contêineres, volumes e binários locais
 	$(ALL) down -v --remove-orphans
 	rm -rf bin coverage.out
 
+## Painel (web/)
+
+.PHONY: web-dev
+web-dev: ## Painel em modo dev (Vite) apontando para a API em API_PORT
+	cd web && pnpm install --frozen-lockfile && VITE_API_URL=http://localhost:$(or $(API_PORT),8085) pnpm dev
+
+.PHONY: web-check
+web-check: ## Lint, typecheck, testes e build do painel
+	cd web && pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm test && pnpm build
+
 ## Qualidade
 
 .PHONY: fmt

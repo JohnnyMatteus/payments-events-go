@@ -43,6 +43,7 @@ internal/adapter/httpapi/     webhook, assinatura HMAC, rotas
 internal/adapter/postgres/    recorder, outbox, ledger reader, projeção, migrations
 internal/adapter/rabbitmq/    topologia, publisher (confirms), consumer (retry/DLQ)
 internal/adapter/objectstore/ abertura de s3://... e arquivos locais
+internal/adapter/sqsqueue/      fila SQS com as notificações do S3 (dispara a conciliação)
 internal/adapter/csvstatement/ parser do extrato
 internal/adapter/reportout/   relatório texto/JSON
 internal/platform/            config (env) e observabilidade

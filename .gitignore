@@ -20,3 +20,5 @@ config.local.yaml
 
 # Relatórios gerados localmente
 /reports/
+node_modules/
+web/dist/
