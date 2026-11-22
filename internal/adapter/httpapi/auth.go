@@ -24,9 +24,9 @@ const (
 // Erros de autenticação. O middleware os traduz em 401 e 403.
 var (
 	// ErrUnauthorized: sem credencial ou credencial inválida.
-	ErrUnauthorized = errors.New("unauthorized")
+	ErrUnauthorized = app.ErrUnauthenticated
 	// ErrNoRole: credencial válida, mas sem papel mapeado para este serviço.
-	ErrNoRole = errors.New("authenticated without a known role")
+	ErrNoRole = app.ErrForbidden
 )
 
 // Authenticator identifica quem fez a requisição. Token estático (dev) e OIDC
@@ -125,6 +125,11 @@ func (a *OperatorAuth) Authenticate(r *http.Request) (app.Actor, error) {
 	if !ok {
 		return app.Actor{}, ErrUnauthorized
 	}
+	return a.AuthenticateBearer(r.Context(), token)
+}
+
+// AuthenticateBearer identifica o operador de um token já extraído (HTTP ou gRPC).
+func (a *OperatorAuth) AuthenticateBearer(_ context.Context, token string) (app.Actor, error) {
 	who, ok := a.operatorFor(token)
 	if !ok {
 		return app.Actor{}, ErrUnauthorized

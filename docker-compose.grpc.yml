@@ -1,0 +1,10 @@
+# Override: liga o gRPC interno de saldo (ADR 0016) na API. `make up-grpc`.
+# Exige autenticação (tokens de dev do compose base ou `docker-compose.oidc.yml`):
+# sem ela o processo recusa subir. Sem TLS, só em dev; por isso a porta é
+# publicada apenas em 127.0.0.1.
+services:
+  api:
+    environment:
+      GRPC_ADDR: ":9091"
+    ports:
+      - "127.0.0.1:${GRPC_PORT:-9191}:9091"

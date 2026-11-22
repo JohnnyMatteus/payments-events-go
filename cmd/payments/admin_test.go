@@ -99,3 +99,15 @@ func TestNewVerifierFailsClosedWithoutSecrets(t *testing.T) {
 		t.Error("cofre fora do ar na subida deve falhar")
 	}
 }
+
+// O gRPC de saldo nunca sobe aberto: sem autenticação o processo recusa.
+func TestBalanceGRPCRefusesToStartWithoutAuthentication(t *testing.T) {
+	t.Parallel()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if srv, err := balanceGRPC(config.Config{GRPCAddr: ":0"}, nil, nil, logger); err == nil || srv != nil {
+		t.Fatalf("balanceGRPC sem autenticação = %v, %v, want error", srv, err)
+	}
+	if srv, err := balanceGRPC(config.Config{}, nil, nil, logger); err != nil || srv != nil {
+		t.Fatalf("gRPC desligado = %v, %v, want nil, nil", srv, err)
+	}
+}

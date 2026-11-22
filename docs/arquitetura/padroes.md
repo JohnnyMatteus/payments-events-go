@@ -69,6 +69,13 @@ Não usamos Specification nem Chain of Responsibility: as validações do evento
   exportado, nunca movido. [`RetentionService`](../../internal/app/retention.go) só conhece portas e valida a
   política (pisos) antes de qualquer coisa. Custo: a linha antiga mostra só um resumo e a trilha precisa do arquivo.
 
+## gRPC interno
+
+- **Adapter de entrada fino + interceptor de autenticação** ([`grpcapi`](../../internal/adapter/grpcapi/server.go)):
+  o servidor só traduz protobuf para o [`BalanceService`](../../internal/app/balance.go), que decide o papel; o
+  interceptor reaproveita a porta `AuthenticateBearer` do HTTP. Custo: o código gerado entra no repositório e precisa
+  de `make proto` quando o contrato muda.
+
 ## SOLID
 
 | Princípio | Onde | O que ganha | Custo |

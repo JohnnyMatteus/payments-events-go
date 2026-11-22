@@ -101,3 +101,24 @@ func TestLoadValidatesSecretsConfiguration(t *testing.T) {
 		t.Errorf("config válida: %v", err)
 	}
 }
+
+func TestLoadValidatesGRPCConfiguration(t *testing.T) {
+	t.Parallel()
+	for name, m := range map[string]map[string]string{
+		"tls pela metade":  {"GRPC_ADDR": ":9091", "GRPC_TLS_CERT_FILE": "c.pem"},
+		"produção sem tls": {"GRPC_ADDR": ":9091", "APP_ENV": "production"},
+	} {
+		if _, err := Load(env(m)); err == nil {
+			t.Errorf("%s: Load must fail", name)
+		}
+	}
+	for name, m := range map[string]map[string]string{
+		"dev sem tls":      {"GRPC_ADDR": ":9091"},
+		"produção com tls": {"GRPC_ADDR": ":9091", "APP_ENV": "production", "GRPC_TLS_CERT_FILE": "c.pem", "GRPC_TLS_KEY_FILE": "k.pem"},
+		"desligado":        {"APP_ENV": "production"},
+	} {
+		if _, err := Load(env(m)); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}

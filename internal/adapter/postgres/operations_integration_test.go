@@ -177,3 +177,26 @@ func TestObjectClaimsAreAtomicAndReleasable(t *testing.T) {
 func as(ctx context.Context, name string) context.Context {
 	return app.WithActor(ctx, app.Actor{ID: "dev:" + name, Name: name, Role: app.RoleOperator})
 }
+
+func TestPaymentBalanceReadsProjectionAndLedger(t *testing.T) {
+	testinfra.ResetDatabase(t, pool)
+	ctx := context.Background()
+	ev := capture("evt_bal", "txn_bal", 15000)
+	ev.MerchantID = "loja_1"
+	ingest(t, ev)
+	reader := postgres.NewOperationsReader(pool)
+	if _, err := reader.PaymentBalance(ctx, "pay_txn_bal"); !errors.Is(err, app.ErrNotFound) {
+		t.Fatalf("antes da projeção = %v, want ErrNotFound", err)
+	}
+	_, err := postgres.NewProjectionRepository(pool).ApplyOnce(ctx, "balance-projector", "evt_bal", app.LedgerEntryRecorded{
+		SchemaVersion: 1, EventID: "evt_bal", TransactionID: "txn_bal", PaymentID: "pay_txn_bal",
+		Direction: domain.Credit, AmountCents: 15000, Currency: "BRL", OccurredAt: baseTime,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := reader.PaymentBalance(ctx, "pay_txn_bal")
+	if err != nil || got.MerchantID != "loja_1" || got.CapturedCents != 15000 || got.LedgerNetCents != 15000 || got.Currency != "BRL" {
+		t.Fatalf("PaymentBalance = %+v, %v", got, err)
+	}
+}

@@ -28,7 +28,9 @@ se o provedor reenviasse o evento.
   `processed_events` o fato mínimo (`outbox_published_at`, `outbox_purged_at`): a trilha mostra "publicada, linha do
   outbox arquivada" (e não "sem mensagem"), a lista mantém o status e o redrive de uma dead letter que chegar depois
   da limpeza recria a mensagem pendente, com o mesmo `message_id`, a partir da rota e do corpo guardados na própria
-  dead letter. Dead letter sem origem no outbox continua recusada.
+  dead letter. Dead letter sem origem no outbox continua recusada. Limite: `dead_letters` não guarda os headers da
+  mensagem original (o `traceparent` que ligava o reprocessamento ao trace do webhook), então a mensagem recriada
+  sai sem eles e o consumidor começa um trace novo.
 - **Execução**: `payments retention`, um job (CronJob), nunca no caminho do webhook. Execuções concorrentes se
   serializam por advisory lock; cada rotina anda em lotes.
 - **Prazos configuráveis**: `RETENTION_OUTBOX_AFTER` (7 dias), `RETENTION_EVENTS_AFTER` (30 dias),

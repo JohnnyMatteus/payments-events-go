@@ -40,6 +40,11 @@ type Config struct {
 	StatementsBucket   string
 	StatementsQueueURL string
 
+	// gRPC interno de saldo (ADR 0016). Sem GRPC_ADDR fica desligado.
+	GRPCAddr        string
+	GRPCTLSCertFile string
+	GRPCTLSKeyFile  string
+
 	// Retenção (ADR 0015). Os prazos são configuráveis porque nenhum prazo
 	// legal foi definido; os padrões são só pontos de partida.
 	LedgerArchiveBucket        string
@@ -110,6 +115,10 @@ func Load(getenv func(string) string) (Config, error) {
 		StatementsBucket:   p.str("STATEMENTS_BUCKET", "pagafacil-statements"),
 		StatementsQueueURL: p.str("STATEMENTS_QUEUE_URL", ""),
 
+		GRPCAddr:        p.str("GRPC_ADDR", ""),
+		GRPCTLSCertFile: p.str("GRPC_TLS_CERT_FILE", ""),
+		GRPCTLSKeyFile:  p.str("GRPC_TLS_KEY_FILE", ""),
+
 		LedgerArchiveBucket:        p.str("LEDGER_ARCHIVE_BUCKET", "pagafacil-ledger-archive"),
 		RetentionOutboxAfter:       p.duration("RETENTION_OUTBOX_AFTER", 7*24*time.Hour),
 		RetentionEventsAfter:       p.duration("RETENTION_EVENTS_AFTER", 30*24*time.Hour),
@@ -143,6 +152,7 @@ func Load(getenv func(string) string) (Config, error) {
 		p.errs = append(p.errs, fmt.Errorf("APP_ENV: expected dev or production, got %q", cfg.AppEnv))
 	}
 	p.errs = append(p.errs, cfg.validateSecrets()...)
+	p.errs = append(p.errs, cfg.validateGRPC()...)
 	return cfg, errors.Join(p.errs...)
 }
 
@@ -246,6 +256,19 @@ func (c Config) validateSecrets() []error {
 		}
 	default:
 		errs = append(errs, fmt.Errorf("SECRETS_PROVIDER: expected env, vault or awssm, got %q", c.SecretsProvider))
+	}
+	return errs
+}
+
+// validateGRPC recusa TLS pela metade e, em produção, gRPC sem TLS: o token de
+// acesso não pode trafegar em texto claro.
+func (c Config) validateGRPC() []error {
+	var errs []error
+	if (c.GRPCTLSCertFile == "") != (c.GRPCTLSKeyFile == "") {
+		errs = append(errs, errors.New("GRPC_TLS_CERT_FILE e GRPC_TLS_KEY_FILE devem ser definidos juntos"))
+	}
+	if c.GRPCAddr != "" && c.AppEnv == "production" && c.GRPCTLSCertFile == "" {
+		errs = append(errs, errors.New("GRPC_ADDR em APP_ENV=production exige GRPC_TLS_CERT_FILE e GRPC_TLS_KEY_FILE"))
 	}
 	return errs
 }

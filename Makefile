@@ -40,6 +40,10 @@ up-portfolio: network ## Sobe o núcleo ligado à rede portfolio-net
 up-oidc: network ## Sobe o núcleo com login OIDC (exige OIDC_ISSUER_URL, OIDC_AUTHORITY e OIDC_CLIENT_ID)
 	$(CORE) -f docker-compose.yml -f docker-compose.oidc.yml up -d --build --wait
 
+.PHONY: up-grpc
+up-grpc: ## Sobe o núcleo com o gRPC de saldo em 127.0.0.1:GRPC_PORT (exige autenticação configurada)
+	$(CORE) -f docker-compose.yml -f docker-compose.grpc.yml up -d --build --wait
+
 .PHONY: up-secrets
 up-secrets: ## Sobe o núcleo lendo segredos do Secrets Manager (LocalStack)
 	$(CORE) -f docker-compose.yml -f docker-compose.secrets.yml up -d --build --wait
@@ -47,6 +51,10 @@ up-secrets: ## Sobe o núcleo lendo segredos do Secrets Manager (LocalStack)
 .PHONY: retention
 retention: ## Aplica a política de retenção (outbox publicado, payloads antigos, arquivo do ledger)
 	$(COMPOSE) --profile core --profile tools run --rm retention
+
+.PHONY: proto
+proto: ## Regenera o código gRPC de api/proto (exige protoc no PATH)
+	./scripts/gen-proto.sh
 
 .PHONY: down
 down: ## Para os contêineres (mantém os volumes)

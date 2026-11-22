@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/csvstatement"
+	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/grpcapi"
 	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/httpapi"
 	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/objectstore"
 	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/oidcauth"
@@ -16,10 +17,17 @@ import (
 	"github.com/JohnnyMatteus/payments-events-go/internal/platform/config"
 )
 
+// identityProvider é o que a autenticação oferece às duas portas de entrada:
+// HTTP (painel) e gRPC (outros serviços).
+type identityProvider interface {
+	httpapi.Authenticator
+	grpcapi.TokenAuthenticator
+}
+
 // operatorAuthenticator escolhe como os operadores se identificam: OIDC
 // quando OIDC_ISSUER_URL está definido, token estático só em dev. Sem nenhum
 // dos dois devolve nil e a API de operação fica desligada, em vez de aberta.
-func operatorAuthenticator(ctx context.Context, cfg config.Config, logger *slog.Logger) (httpapi.Authenticator, error) {
+func operatorAuthenticator(ctx context.Context, cfg config.Config, logger *slog.Logger) (identityProvider, error) {
 	switch {
 	case cfg.OIDCIssuerURL != "" && len(cfg.OperatorTokens) > 0:
 		return nil, errors.New("OIDC_ISSUER_URL e OPERATOR_TOKENS definidos juntos: escolha um modo de autenticação")
@@ -48,10 +56,10 @@ func operatorAuthenticator(ctx context.Context, cfg config.Config, logger *slog.
 }
 
 // adminOption monta a API de operação (desligada sem autenticação configurada).
-func adminOption(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (httpapi.RouterOption, error) {
-	auth, err := operatorAuthenticator(ctx, cfg, logger)
-	if err != nil || auth == nil {
-		return nil, err
+func adminOption(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, auth identityProvider,
+	logger *slog.Logger) (httpapi.RouterOption, error) {
+	if auth == nil {
+		return nil, nil
 	}
 	opener, err := objectstore.New(ctx, objectstore.S3Config{
 		Endpoint: cfg.S3Endpoint, Region: cfg.AWSRegion, UsePathStyle: cfg.S3UsePathStyle,
