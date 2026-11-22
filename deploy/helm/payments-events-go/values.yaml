@@ -1,19 +1,57 @@
-# Rascunho: valores de exemplo. Segredos vêm de um Secret existente
-# (existingSecret) com DATABASE_URL, RABBITMQ_URL e WEBHOOK_SECRETS.
+# Valores de exemplo. Segredos nunca ficam aqui: vêm do Secret existingSecret
+# (DATABASE_URL, RABBITMQ_URL e, com secrets.provider=env, WEBHOOK_SECRETS) ou do cofre.
 image:
   repository: ghcr.io/johnnymatteus/payments-events-go
-  tag: ""
+  tag: ""        # vazio usa o appVersion do chart
+  digest: ""     # sha256:... fixa a imagem por digest e ignora a tag
   pullPolicy: IfNotPresent
+imagePullSecrets: []
 
 existingSecret: payments-events-go
 
-env:
-  LOG_LEVEL: info
-  AWS_REGION: us-east-1
-  OTEL_EXPORTER_OTLP_ENDPOINT: ""
+serviceAccount:
+  create: true
+  name: ""
+  # O token da service account só é montado quando o login no Vault por
+  # Kubernetes precisa dele (secrets.vault.k8sRole).
+  automount: false
+
+config:
+  appEnv: production        # production recusa OPERATOR_TOKENS (ADR 0013)
+  logLevel: info
+  awsRegion: us-east-1
+  s3Endpoint: ""            # vazio usa o S3 da AWS; no LocalStack, o endpoint do emulador
+  statementsBucket: pagafacil-statements
+  statementsQueueUrl: ""    # fila SQS das notificações do S3 (obrigatória para o watcher)
+  otlpEndpoint: ""
+  extraEnv: {}              # variáveis adicionais, chave: valor
+
+# Login dos operadores e dos serviços (gRPC). Sem issuerUrl a API de operação fica desligada.
+oidc:
+  issuerUrl: ""
+  audience: edge-gateway
+  roleReader: payments.read
+  roleOperator: payments.write
+
+secrets:
+  provider: env             # env, vault ou awssm (ADR 0014)
+  refreshInterval: 1m
+  webhookRef: ""            # obrigatório com vault/awssm
+  databasePasswordRef: ""
+  endpoint: ""              # Secrets Manager em emulador
+  vault:
+    addr: ""
+    kvMount: secret
+    k8sRole: ""
+
+# gRPC interno de saldo (ADR 0016). Em production exige um Secret TLS (tls.crt e tls.key).
+grpc:
+  enabled: false
+  port: 9091
+  tlsSecret: ""
 
 api:
-  replicas: 2
+  replicas: 2               # ignorado quando autoscaling.enabled
   resources:
     requests: {cpu: 100m, memory: 64Mi}
     limits: {memory: 256Mi}
@@ -30,8 +68,43 @@ consumer:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {memory: 256Mi}
 
+watcher:
+  enabled: true
+  replicas: 1
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 256Mi}
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Roda `payments migrate` antes de cada instalação/atualização (hook do Helm, que o ArgoCD trata como PreSync).
+migrate:
+  enabled: true
+
 reconcile:
   enabled: true
-  # Todo dia às 06:00 UTC, concilia o dia anterior.
+  # Todo dia às 06:00 UTC, concilia o dia anterior (payments reconcile -daily).
   schedule: "0 6 * * *"
-  bucket: pagafacil-statements
+
+# Retenção (ADR 0015): outbox publicado, payloads antigos e exportação mensal do ledger.
+retention:
+  enabled: true
+  schedule: "30 4 * * *"
+  outboxAfter: 168h
+  eventsAfter: 720h
+  ledgerExportAfter: 2160h
+  batchSize: 1000
+  ledgerArchiveBucket: pagafacil-ledger-archive
+
+# Restringe a entrada nos pods da API (HTTP e gRPC) e a coleta de métricas. Exige um CNI que aplique NetworkPolicy.
+networkPolicy:
+  enabled: false
+  ingressFrom: []           # seletores extras (namespace/pod) autorizados a chamar a API

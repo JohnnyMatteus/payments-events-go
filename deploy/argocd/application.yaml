@@ -1,0 +1,46 @@
+# GitOps com ArgoCD: sincroniza o chart deste repositório. Ajuste repoURL,
+# destination e os valores do ambiente (oidc.issuerUrl, secrets, config.*).
+# O hook pre-install/pre-upgrade do chart (payments migrate) vira PreSync.
+# Não foi aplicado em nenhum cluster (nenhum disponível ao escrever).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: payments-events-go
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/JohnnyMatteus/payments-events-go.git
+    targetRevision: main
+    path: deploy/helm/payments-events-go
+    helm:
+      releaseName: payments
+      valueFiles:
+        - values.yaml
+      valuesObject:
+        config:
+          appEnv: production
+        oidc:
+          issuerUrl: https://idp.example.com/realms/edge
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: payments
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 3
+      backoff: {duration: 10s, factor: 2, maxDuration: 3m}
+  # O HPA controla as réplicas da API; sem isto o ArgoCD brigaria com ele.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: payments-api
+      jsonPointers:
+        - /spec/replicas

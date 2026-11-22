@@ -1,0 +1,32 @@
+{{- if .Values.migrate.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "payments.fullname" . }}-migrate
+  labels:
+    {{- include "payments.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    # O Helm roda antes de instalar/atualizar; o ArgoCD trata o hook do Helm como PreSync.
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        {{- include "payments.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      {{- include "payments.podCommon" . | nindent 6 }}
+      containers:
+        - name: migrate
+          image: {{ include "payments.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["migrate"]
+          {{- include "payments.env" . | nindent 10 }}
+          {{- include "payments.securityContext" . | nindent 10 }}
+{{- end }}

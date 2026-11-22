@@ -1,0 +1,43 @@
+{{- if .Values.retention.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "payments.fullname" . }}-retention
+  labels:
+    {{- include "payments.labels" . | nindent 4 }}
+    app.kubernetes.io/component: retention
+spec:
+  schedule: {{ .Values.retention.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            {{- include "payments.labels" . | nindent 12 }}
+            app.kubernetes.io/component: retention
+        spec:
+          restartPolicy: Never
+          {{- include "payments.podCommon" . | nindent 10 }}
+          containers:
+            - name: retention
+              image: {{ include "payments.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args: ["retention"]
+              {{- include "payments.env" . | nindent 14 }}
+                - name: RETENTION_OUTBOX_AFTER
+                  value: {{ .Values.retention.outboxAfter | quote }}
+                - name: RETENTION_EVENTS_AFTER
+                  value: {{ .Values.retention.eventsAfter | quote }}
+                - name: RETENTION_LEDGER_EXPORT_AFTER
+                  value: {{ .Values.retention.ledgerExportAfter | quote }}
+                - name: RETENTION_BATCH_SIZE
+                  value: {{ .Values.retention.batchSize | quote }}
+                - name: LEDGER_ARCHIVE_BUCKET
+                  value: {{ .Values.retention.ledgerArchiveBucket | quote }}
+              {{- include "payments.securityContext" . | nindent 14 }}
+{{- end }}

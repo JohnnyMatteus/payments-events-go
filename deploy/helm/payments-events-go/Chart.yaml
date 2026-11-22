@@ -1,6 +1,6 @@
 apiVersion: v2
 name: payments-events-go
-description: Rascunho do chart do processador de eventos de pagamento (api, relay, consumer e CronJob de conciliação).
+description: Processador de webhooks de pagamento (api, relay, consumer, watcher), jobs de conciliação e retenção, HPA, PDB e hook de migração.
 type: application
-version: 0.1.0
+version: 0.2.0
 appVersion: "0.1.0"
