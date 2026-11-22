@@ -285,8 +285,8 @@ func (r *OperationsReader) PipelineHealth(ctx context.Context, now time.Time) (a
 			COUNT(*) FILTER (WHERE status = 'pending'),
 			COUNT(*) FILTER (WHERE status = 'dead'),
 			MIN(created_at) FILTER (WHERE status = 'pending'),
-			COUNT(*) FILTER (WHERE status = 'published' AND published_at > $1 - interval '1 minute'),
-			COUNT(*) FILTER (WHERE status = 'published' AND published_at > $1 - interval '1 hour')
+			COUNT(*) FILTER (WHERE status = 'published' AND published_at > $1::timestamptz - interval '1 minute'),
+			COUNT(*) FILTER (WHERE status = 'published' AND published_at > $1::timestamptz - interval '1 hour')
 		FROM outbox_messages`, now).
 		Scan(&h.OutboxPending, &h.OutboxDead, &oldestPending, &h.PublishedLastMinute, &h.PublishedLastHour)
 	if err != nil {
