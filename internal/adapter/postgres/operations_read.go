@@ -290,6 +290,31 @@ func (r *OperationsReader) PaymentBalances(ctx context.Context, merchantID, curs
 	return page, nil
 }
 
+// PaymentBalance devolve a projeção de um pagamento, comparada ao ledger.
+func (r *OperationsReader) PaymentBalance(ctx context.Context, paymentID string) (app.PaymentBalance, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT pb.payment_id, COALESCE(l.merchant_id, ''), pb.currency, pb.captured_cents, pb.refunded_cents,
+			COALESCE(l.net, 0), pb.updated_at
+		FROM payment_balances pb
+		LEFT JOIN (
+			SELECT payment_id, MAX(merchant_id) AS merchant_id,
+				SUM(CASE direction WHEN 'credit' THEN amount_cents ELSE -amount_cents END) AS net
+			FROM ledger_entries WHERE payment_id = $1 GROUP BY payment_id
+		) l USING (payment_id)
+		WHERE pb.payment_id = $1`, paymentID)
+	if err != nil {
+		return app.PaymentBalance{}, fmt.Errorf("query payment balance: %w", err)
+	}
+	b, err := pgx.CollectOneRow(rows, pgx.RowToStructByPos[app.PaymentBalance])
+	if errors.Is(err, pgx.ErrNoRows) {
+		return app.PaymentBalance{}, app.ErrNotFound
+	}
+	if err != nil {
+		return app.PaymentBalance{}, fmt.Errorf("scan payment balance: %w", err)
+	}
+	return b, nil
+}
+
 // PipelineHealth resume o outbox, o consumidor e a DLQ.
 func (r *OperationsReader) PipelineHealth(ctx context.Context, now time.Time) (app.PipelineHealth, error) {
 	var (

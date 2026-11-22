@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package payments.balance.v1;
+
+option go_package = "github.com/JohnnyMatteus/payments-events-go/internal/adapter/grpcapi/balancev1;balancev1";
+
+// BalanceService é a consulta interna de saldo para outros serviços. Só leitura.
+//
+// Autenticação: access token OIDC no metadata "authorization: Bearer <token>"
+// (o mesmo emissor e as mesmas roles do painel). A role de leitura basta; sem
+// token, UNAUTHENTICATED; token sem role, PERMISSION_DENIED.
+//
+// Valores em centavos (int64), nunca ponto flutuante.
+service BalanceService {
+  // Saldo de um pagamento na projeção, comparado ao ledger. NOT_FOUND se não há projeção.
+  rpc GetPaymentBalance(GetPaymentBalanceRequest) returns (PaymentBalance);
+  // Saldo por lojista segundo o ledger, comparado ao que a projeção já refletiu.
+  rpc ListMerchantBalances(ListMerchantBalancesRequest) returns (ListMerchantBalancesResponse);
+  // Saldos por pagamento, com paginação por cursor (page_token opaco).
+  rpc ListPaymentBalances(ListPaymentBalancesRequest) returns (ListPaymentBalancesResponse);
+}
+
+message GetPaymentBalanceRequest {
+  string payment_id = 1;
+}
+
+message ListMerchantBalancesRequest {}
+
+message ListPaymentBalancesRequest {
+  // Vazio lista todos os lojistas.
+  string merchant_id = 1;
+  string page_token = 2;
+  // 0 usa o padrão do servidor; o servidor limita o máximo.
+  int32 page_size = 3;
+}
+
+message PaymentBalance {
+  string payment_id = 1;
+  string merchant_id = 2;
+  string currency = 3;
+  int64 captured_cents = 4;
+  int64 refunded_cents = 5;
+  // Soma do ledger para o pagamento (crédito menos débito).
+  int64 ledger_net_cents = 6;
+  // RFC 3339, UTC.
+  string updated_at = 7;
+}
+
+message MerchantBalance {
+  string merchant_id = 1;
+  string currency = 2;
+  int64 payments = 3;
+  int64 captured_cents = 4;
+  int64 refunded_cents = 5;
+  int64 adjustment_cents = 6;
+  int64 ledger_net_cents = 7;
+  int64 projected_net_cents = 8;
+  // Lançamentos do ledger que o consumidor ainda não projetou.
+  int64 unprojected_messages = 9;
+}
+
+message ListMerchantBalancesResponse {
+  repeated MerchantBalance items = 1;
+}
+
+message ListPaymentBalancesResponse {
+  repeated PaymentBalance items = 1;
+  // Vazio na última página.
+  string next_page_token = 2;
+}

@@ -48,6 +48,10 @@ up-secrets: ## Sobe o núcleo lendo segredos do Secrets Manager (LocalStack)
 retention: ## Aplica a política de retenção (outbox publicado, payloads antigos, arquivo do ledger)
 	$(COMPOSE) --profile core --profile tools run --rm retention
 
+.PHONY: proto
+proto: ## Regenera o código gRPC de api/proto (exige protoc no PATH)
+	./scripts/gen-proto.sh
+
 .PHONY: down
 down: ## Para os contêineres (mantém os volumes)
 	$(ALL) down

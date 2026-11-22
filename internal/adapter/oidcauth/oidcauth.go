@@ -67,10 +67,18 @@ type claims struct {
 // inválido é ErrUnauthorized; token válido sem role mapeada é ErrNoRole.
 func (a *Authenticator) Authenticate(r *http.Request) (app.Actor, error) {
 	raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || raw == "" {
+	if !ok {
 		return app.Actor{}, httpapi.ErrUnauthorized
 	}
-	tok, err := a.verifier.Verify(r.Context(), raw)
+	return a.AuthenticateBearer(r.Context(), raw)
+}
+
+// AuthenticateBearer verifica um token já extraído (HTTP ou gRPC).
+func (a *Authenticator) AuthenticateBearer(ctx context.Context, raw string) (app.Actor, error) {
+	if raw == "" {
+		return app.Actor{}, httpapi.ErrUnauthorized
+	}
+	tok, err := a.verifier.Verify(ctx, raw)
 	if err != nil {
 		return app.Actor{}, httpapi.ErrUnauthorized
 	}

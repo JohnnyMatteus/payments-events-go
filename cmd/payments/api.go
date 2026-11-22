@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/httpapi"
 	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/postgres"
 	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/redisstore"
@@ -55,7 +57,11 @@ func runAPI(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return err
 	}
 	var routerOpts []httpapi.RouterOption
-	admin, err := adminOption(ctx, cfg, pool, logger)
+	auth, err := operatorAuthenticator(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	admin, err := adminOption(ctx, cfg, pool, auth, logger)
 	if err != nil {
 		return err
 	}
@@ -63,5 +69,15 @@ func runAPI(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		routerOpts = append(routerOpts, admin)
 	}
 	router := httpapi.NewRouter(webhook, tel.MetricsHandler, pool.Ping, routerOpts...)
-	return serve(ctx, newServer(cfg.HTTPAddr, router), cfg.ShutdownTimeout, logger)
+	grpcSrv, err := balanceGRPC(cfg, pool, auth, logger)
+	if err != nil {
+		return err
+	}
+	if grpcSrv == nil {
+		return serve(ctx, newServer(cfg.HTTPAddr, router), cfg.ShutdownTimeout, logger)
+	}
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error { return serve(gctx, newServer(cfg.HTTPAddr, router), cfg.ShutdownTimeout, logger) })
+	g.Go(func() error { return serveGRPC(gctx, grpcSrv, cfg.GRPCAddr, cfg.ShutdownTimeout, logger) })
+	return g.Wait()
 }
