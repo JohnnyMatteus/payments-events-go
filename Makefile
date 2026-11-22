@@ -44,6 +44,10 @@ up-oidc: network ## Sobe o núcleo com login OIDC (exige OIDC_ISSUER_URL, OIDC_A
 up-secrets: ## Sobe o núcleo lendo segredos do Secrets Manager (LocalStack)
 	$(CORE) -f docker-compose.yml -f docker-compose.secrets.yml up -d --build --wait
 
+.PHONY: retention
+retention: ## Aplica a política de retenção (outbox publicado, payloads antigos, arquivo do ledger)
+	$(COMPOSE) --profile core --profile tools run --rm retention
+
 .PHONY: down
 down: ## Para os contêineres (mantém os volumes)
 	$(ALL) down

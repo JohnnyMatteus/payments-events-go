@@ -152,7 +152,12 @@ func (r *OperationsReader) EventTrail(ctx context.Context, eventID string) (app.
 		return trail, fmt.Errorf("query event: %w", err)
 	}
 	trail.Event = event
-	if err := r.pool.QueryRow(ctx, "SELECT payload FROM processed_events WHERE event_id = $1", eventID).Scan(&payload); err != nil {
+	// Evento arquivado: o payload completo está em processed_events_archive.
+	if err := r.pool.QueryRow(ctx, `
+		SELECT CASE WHEN pe.archived_at IS NULL THEN pe.payload
+			ELSE COALESCE((SELECT a.payload FROM processed_events_archive a
+				WHERE a.event_id = pe.event_id AND a.received_at = pe.received_at), pe.payload) END
+		FROM processed_events pe WHERE pe.event_id = $1`, eventID).Scan(&payload); err != nil {
 		return trail, fmt.Errorf("query event payload: %w", err)
 	}
 	trail.Payload = payload

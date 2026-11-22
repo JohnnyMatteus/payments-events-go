@@ -28,4 +28,9 @@ awslocal s3api put-bucket-notification-configuration --bucket "$BUCKET" --notifi
     \"Filter\": {\"Key\": {\"FilterRules\": [{\"Name\": \"prefix\", \"Value\": \"settlements/\"}]}}
   }]
 }"
-echo "bucket s3://$BUCKET e fila $QUEUE prontos"
+# Arquivo das exportações mensais do ledger (job de retenção, ADR 0015).
+ARCHIVE_BUCKET=pagafacil-ledger-archive
+awslocal s3api create-bucket --bucket "$ARCHIVE_BUCKET" >/dev/null 2>&1 || true
+awslocal s3api put-bucket-versioning --bucket "$ARCHIVE_BUCKET" --versioning-configuration Status=Enabled
+
+echo "bucket s3://$BUCKET, arquivo s3://$ARCHIVE_BUCKET e fila $QUEUE prontos"

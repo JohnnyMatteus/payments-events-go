@@ -61,6 +61,14 @@ Não usamos Specification nem Chain of Responsibility: as validações do evento
   ([`Verifier.SetSecrets`](../../internal/adapter/httpapi/signature.go)). Custo: um polling por segredo e a regra de
   que o cofre nunca pode ser a única verdade em runtime (a queda dele não derruba, mas congela a rotação).
 
+## Retenção
+
+- **Tombstone por linha + arquivo particionado** ([`Retention.ArchiveEventPayloads`](../../internal/adapter/postgres/retention.go),
+  [migração 0006](../../internal/adapter/postgres/migrations/0006_retention.sql)): a linha com a chave de
+  idempotência fica; o peso (payload) vai para uma tabela particionada por mês. O ledger é protegido por gatilho e
+  exportado, nunca movido. [`RetentionService`](../../internal/app/retention.go) só conhece portas e valida a
+  política (pisos) antes de qualquer coisa. Custo: a linha antiga mostra só um resumo e a trilha precisa do arquivo.
+
 ## SOLID
 
 | Princípio | Onde | O que ganha | Custo |

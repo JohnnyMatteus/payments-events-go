@@ -39,7 +39,15 @@ type Config struct {
 
 	StatementsBucket   string
 	StatementsQueueURL string
-	OperatorTokens     []string
+
+	// Retenção (ADR 0015). Os prazos são configuráveis porque nenhum prazo
+	// legal foi definido; os padrões são só pontos de partida.
+	LedgerArchiveBucket        string
+	RetentionOutboxAfter       time.Duration
+	RetentionEventsAfter       time.Duration
+	RetentionLedgerExportAfter time.Duration
+	RetentionBatchSize         int
+	OperatorTokens             []string
 
 	// AppEnv é "dev" ou "production". Em produção o token estático de
 	// operador é recusado e só o OIDC autentica (ADR 0013).
@@ -101,7 +109,13 @@ func Load(getenv func(string) string) (Config, error) {
 
 		StatementsBucket:   p.str("STATEMENTS_BUCKET", "pagafacil-statements"),
 		StatementsQueueURL: p.str("STATEMENTS_QUEUE_URL", ""),
-		OperatorTokens:     p.list("OPERATOR_TOKENS"),
+
+		LedgerArchiveBucket:        p.str("LEDGER_ARCHIVE_BUCKET", "pagafacil-ledger-archive"),
+		RetentionOutboxAfter:       p.duration("RETENTION_OUTBOX_AFTER", 7*24*time.Hour),
+		RetentionEventsAfter:       p.duration("RETENTION_EVENTS_AFTER", 30*24*time.Hour),
+		RetentionLedgerExportAfter: p.duration("RETENTION_LEDGER_EXPORT_AFTER", 90*24*time.Hour),
+		RetentionBatchSize:         p.positiveInt("RETENTION_BATCH_SIZE", 1000),
+		OperatorTokens:             p.list("OPERATOR_TOKENS"),
 
 		AppEnv:           p.str("APP_ENV", "dev"),
 		OIDCIssuerURL:    p.str("OIDC_ISSUER_URL", ""),

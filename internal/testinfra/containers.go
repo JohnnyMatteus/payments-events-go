@@ -160,7 +160,7 @@ func ResetDatabase(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `TRUNCATE processed_events, ledger_entries, outbox_messages,
 		consumed_messages, payment_balances, dead_letters, reconciliation_runs, reconciliation_items,
-		divergence_cases, ledger_adjustments, statement_object_claims RESTART IDENTITY CASCADE`)
+		divergence_cases, ledger_adjustments, statement_object_claims, processed_events_archive, ledger_archives RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("reset database: %v", err)
 	}

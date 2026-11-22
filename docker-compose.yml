@@ -256,6 +256,19 @@ services:
       postgres: {condition: service_healthy}
       localstack: {condition: service_healthy}
 
+  # Retenção sob demanda: `make retention` (ADR 0015). Em produção roda como CronJob.
+  retention:
+    <<: *app
+    profiles: [tools]
+    restart: "no"
+    command: ["retention"]
+    environment:
+      <<: *app-env
+      LEDGER_ARCHIVE_BUCKET: pagafacil-ledger-archive
+    depends_on:
+      postgres: {condition: service_healthy}
+      localstack: {condition: service_healthy}
+
   jaeger:
     image: jaegertracing/jaeger:2.9.0
     profiles: [observability]
