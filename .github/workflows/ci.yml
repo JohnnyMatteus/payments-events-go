@@ -108,6 +108,27 @@ jobs:
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
       - name: docker build
         run: docker build --build-arg VERSION=${{ github.sha }} -t payments-events-go:ci .
+      - name: Exportar a imagem (entrada do SBOM e do scan)
+        run: docker save payments-events-go:ci -o "$RUNNER_TEMP/image.tar"
+      - name: SBOM (syft, SPDX e CycloneDX)
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$RUNNER_TEMP:/work" anchore/syft:v1.57.2 scan docker-archive:/work/image.tar \
+            -o spdx-json=/work/sbom.spdx.json -o cyclonedx-json=/work/sbom.cdx.json
+          # Um SBOM vazio passaria despercebido: o binário Go tem de listar as dependências do módulo.
+          for f in sbom.spdx.json sbom.cdx.json; do
+            grep -q 'jackc/pgx' "$RUNNER_TEMP/$f" || { echo "$f não lista github.com/jackc/pgx"; exit 1; }
+          done
+      - uses: actions/upload-artifact@v6
+        with:
+          name: sbom
+          path: |
+            ${{ runner.temp }}/sbom.spdx.json
+            ${{ runner.temp }}/sbom.cdx.json
+      - name: Trivy (vulnerabilidades HIGH e CRITICAL com correção disponível)
+        run: |
+          docker run --rm -v "$RUNNER_TEMP:/work" aquasec/trivy:0.76.2 image --input /work/image.tar \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress
       - name: docker compose config
         run: docker compose --profile core --profile observability --profile tools config --quiet
       - name: helm lint e template
