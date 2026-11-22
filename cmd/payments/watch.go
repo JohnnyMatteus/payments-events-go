@@ -30,7 +30,7 @@ func runWatch(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 	}
 	defer shutdown()
 
-	pool, err := postgres.Connect(ctx, cfg.DatabaseURL)
+	pool, err := openPool(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}

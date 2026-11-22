@@ -118,3 +118,57 @@ func BenchmarkVerify(b *testing.B) {
 		}
 	}
 }
+
+// Rotação sem downtime: com [novo, antigo] os dois validam; quando o antigo sai
+// da lista, só o novo. Um conjunto vazio não derruba nem abre a verificação.
+func TestVerifierRotationAcceptsBothKeysThenOnlyTheNewOne(t *testing.T) {
+	t.Parallel()
+	body := []byte(`{"id":"evt_1"}`)
+	oldSig := Sign([]byte("whsec_old"), sigNow, body)
+	newSig := Sign([]byte("whsec_new"), sigNow, body)
+	v := newTestVerifier(t, "whsec_old")
+	if err := v.Verify(newSig, body); !errors.Is(err, ErrSignatureMismatch) {
+		t.Fatalf("new key before rotation = %v, want mismatch", err)
+	}
+	if err := v.SetSecrets([]string{"whsec_new", "whsec_old"}); err != nil {
+		t.Fatal(err)
+	}
+	for name, sig := range map[string]string{"antiga": oldSig, "nova": newSig} {
+		if err := v.Verify(sig, body); err != nil {
+			t.Errorf("durante a rotação a chave %s deve validar: %v", name, err)
+		}
+	}
+	if err := v.SetSecrets([]string{" ", ""}); err == nil {
+		t.Fatal("conjunto vazio deve ser recusado")
+	}
+	if err := v.Verify(oldSig, body); err != nil {
+		t.Fatalf("conjunto recusado não pode alterar o vigente: %v", err)
+	}
+	if err := v.SetSecrets([]string{"whsec_new"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Verify(oldSig, body); !errors.Is(err, ErrSignatureMismatch) {
+		t.Fatalf("old key after rotation = %v, want mismatch", err)
+	}
+	if err := v.Verify(newSig, body); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVerifierSetSecretsIsSafeUnderConcurrentVerify(t *testing.T) {
+	t.Parallel()
+	v := newTestVerifier(t, "a")
+	body := []byte("x")
+	sig := Sign([]byte("a"), sigNow, body)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 200 {
+			_ = v.SetSecrets([]string{"a", "b"})
+		}
+	}()
+	for range 200 {
+		_ = v.Verify(sig, body)
+	}
+	<-done
+}

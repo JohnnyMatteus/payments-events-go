@@ -155,6 +155,7 @@ LocalStack, o relatório de conciliação (faltando, sobrando e valor divergente
 | Painel de operação: token por operador com papel (leitor ou operador) e ajustes de ledger com aprovação de outra pessoa | [0011](docs/adr/0011-autenticacao-de-operador-e-quatro-olhos.md) |
 | Conciliação disparada por notificação S3 → SQS (idempotente por versão do objeto) e agenda diária por cron | [0012](docs/adr/0012-disparo-automatico-da-conciliacao.md) |
 | OIDC com PKCE (Keycloak do platform-edge) para operadores; papéis checados no caso de uso; token só em dev | [0013](docs/adr/0013-oidc-pkce-e-papeis-no-caso-de-uso.md) |
+| Segredos do webhook e do banco por porta (Vault e Secrets Manager), com rotação sem downtime | [0014](docs/adr/0014-segredos-por-porta-e-rotacao-sem-downtime.md) |
 
 Padrões de projeto e SOLID com os trechos reais do código: [docs/arquitetura/padroes.md](docs/arquitetura/padroes.md).
 
@@ -173,7 +174,7 @@ Para defender o núcleo numa entrevista: [roteiro de idempotência](docs/roteiro
 
 - Validar no CI o que não foi exercitado localmente nesta rodada (Docker local com erro de I/O): os testes de integração da API de operação (`operations_integration_test.go`), o build da imagem do painel e `docker build` da imagem final, subida completa do `docker-compose` com `make up && make seed && make reconcile` e a suíte `make test-integration` com o LocalStack e o teste ponta a ponta na versão final.
 - Helm chart e manifests Kubernetes (Deployments, CronJob de conciliação, HPA, probes) e GitOps com ArgoCD.
-- Segredos do webhook no Secrets Manager/Vault.
+- Exercitar a leitura de segredos contra um Vault e um Secrets Manager reais (hoje só dublês HTTP e `docker compose config` do `make up-secrets`, ADR 0014) e configurar no Postgres as duas credenciais da rotação da senha.
 - Retenção e particionamento de `processed_events` e `ledger_entries`; limpeza do outbox publicado.
 - Criar no realm `edge` do platform-edge o client público `payments-razao` (PKCE, redirect `/callback`) e validar o login OIDC contra o Keycloak real; hoje o adaptador foi testado só contra um emissor de teste e o `make up-oidc` só passou em `docker compose config` (ADR 0013).
 - gRPC interno para consulta de saldo.

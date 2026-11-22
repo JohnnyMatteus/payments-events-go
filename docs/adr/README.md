@@ -17,3 +17,4 @@ Formato: Contexto, Decisão, Consequências e Alternativas. Um ADR por decisão;
 | [0011](0011-autenticacao-de-operador-e-quatro-olhos.md) | Autenticação de operador e aprovação com quatro olhos | Aceito |
 | [0012](0012-disparo-automatico-da-conciliacao.md) | Disparo automático da conciliação: S3 → SQS e agenda diária | Aceito |
 | [0013](0013-oidc-pkce-e-papeis-no-caso-de-uso.md) | OIDC com PKCE para operadores e papéis checados no caso de uso | Aceito |
+| [0014](0014-segredos-por-porta-e-rotacao-sem-downtime.md) | Segredos por porta (Vault e Secrets Manager) e rotação sem downtime | Aceito |

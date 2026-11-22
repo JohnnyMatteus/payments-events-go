@@ -91,7 +91,7 @@ func runReconcile(ctx context.Context, cfg config.Config, logger *slog.Logger,
 	if opts.daily {
 		return runDaily(ctx, cfg, logger, opts, stdout, stderr)
 	}
-	report, err := reconcile(ctx, cfg, opts)
+	report, err := reconcile(ctx, cfg, logger, opts)
 	if err != nil {
 		logger.ErrorContext(ctx, "reconciliation failed", slog.Any("error", err))
 		return exitError
@@ -130,7 +130,7 @@ func runDaily(ctx context.Context, cfg config.Config, logger *slog.Logger, opts 
 		logger.ErrorContext(ctx, "daily reconciliation failed", slog.Any("error", err))
 		return exitError
 	}
-	pool, err := postgres.Connect(ctx, cfg.DatabaseURL)
+	pool, err := openPool(ctx, cfg, logger)
 	if err != nil {
 		logger.ErrorContext(ctx, "daily reconciliation failed", slog.Any("error", err))
 		return exitError
@@ -156,14 +156,14 @@ func runDaily(ctx context.Context, cfg config.Config, logger *slog.Logger, opts 
 	return exitOK
 }
 
-func reconcile(ctx context.Context, cfg config.Config, opts reconcileOptions) (domain.Report, error) {
+func reconcile(ctx context.Context, cfg config.Config, logger *slog.Logger, opts reconcileOptions) (domain.Report, error) {
 	opener, err := objectstore.New(ctx, objectstore.S3Config{
 		Endpoint: cfg.S3Endpoint, Region: cfg.AWSRegion, UsePathStyle: cfg.S3UsePathStyle,
 	})
 	if err != nil {
 		return domain.Report{}, err
 	}
-	pool, err := postgres.Connect(ctx, cfg.DatabaseURL)
+	pool, err := openPool(ctx, cfg, logger)
 	if err != nil {
 		return domain.Report{}, err
 	}

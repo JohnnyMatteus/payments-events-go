@@ -81,3 +81,23 @@ func TestLoadRejectsUnknownAppEnv(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadValidatesSecretsConfiguration(t *testing.T) {
+	t.Parallel()
+	bad := map[string]map[string]string{
+		"provedor desconhecido":      {"SECRETS_PROVIDER": "consul"},
+		"ref sem cofre":              {"WEBHOOK_SECRETS_REF": "a#b"},
+		"cofre sem ref do webhook":   {"SECRETS_PROVIDER": "vault"},
+		"origem dupla":               {"SECRETS_PROVIDER": "awssm", "WEBHOOK_SECRETS_REF": "a", "WEBHOOK_SECRETS": "x"},
+		"token do vault em produção": {"SECRETS_PROVIDER": "vault", "WEBHOOK_SECRETS_REF": "a#b", "APP_ENV": "production", "VAULT_TOKEN": "t"},
+	}
+	for name, m := range bad {
+		if _, err := Load(env(m)); err == nil {
+			t.Errorf("%s: Load must fail", name)
+		}
+	}
+	good := map[string]string{"SECRETS_PROVIDER": "vault", "WEBHOOK_SECRETS_REF": "a#b", "APP_ENV": "production", "VAULT_K8S_ROLE": "payments"}
+	if _, err := Load(env(good)); err != nil {
+		t.Errorf("config válida: %v", err)
+	}
+}

@@ -49,6 +49,18 @@ type Config struct {
 	OIDCRoleReader   string
 	OIDCRoleOperator string
 
+	// Cofre de segredos (ADR 0014). Com SecretsProvider "env" (padrão) os
+	// segredos vêm das variáveis; com "vault" ou "awssm", das referências.
+	SecretsProvider        string
+	SecretsRefreshInterval time.Duration
+	WebhookSecretsRef      string
+	DatabasePasswordRef    string
+	VaultAddr              string
+	VaultToken             string
+	VaultKVMount           string
+	VaultK8sRole           string
+	SecretsEndpoint        string
+
 	RedisURL            string
 	IdempotencyClaimTTL time.Duration
 	IdempotencyDoneTTL  time.Duration
@@ -97,6 +109,16 @@ func Load(getenv func(string) string) (Config, error) {
 		OIDCRoleReader:   p.str("OIDC_ROLE_READER", "payments.read"),
 		OIDCRoleOperator: p.str("OIDC_ROLE_OPERATOR", "payments.write"),
 
+		SecretsProvider:        p.str("SECRETS_PROVIDER", "env"),
+		SecretsRefreshInterval: p.duration("SECRETS_REFRESH_INTERVAL", time.Minute),
+		WebhookSecretsRef:      p.str("WEBHOOK_SECRETS_REF", ""),
+		DatabasePasswordRef:    p.str("DATABASE_PASSWORD_REF", ""),
+		VaultAddr:              p.str("VAULT_ADDR", ""),
+		VaultToken:             p.str("VAULT_TOKEN", ""),
+		VaultKVMount:           p.str("VAULT_KV_MOUNT", "secret"),
+		VaultK8sRole:           p.str("VAULT_K8S_ROLE", ""),
+		SecretsEndpoint:        p.str("SECRETS_ENDPOINT", ""),
+
 		RedisURL:            p.str("REDIS_URL", ""),
 		IdempotencyClaimTTL: p.duration("IDEMPOTENCY_CLAIM_TTL", 30*time.Second),
 		IdempotencyDoneTTL:  p.duration("IDEMPOTENCY_DONE_TTL", 24*time.Hour),
@@ -106,6 +128,7 @@ func Load(getenv func(string) string) (Config, error) {
 	if cfg.AppEnv != "dev" && cfg.AppEnv != "production" {
 		p.errs = append(p.errs, fmt.Errorf("APP_ENV: expected dev or production, got %q", cfg.AppEnv))
 	}
+	p.errs = append(p.errs, cfg.validateSecrets()...)
 	return cfg, errors.Join(p.errs...)
 }
 
@@ -187,4 +210,28 @@ func (p *parser) positiveInt(key string, def int) int {
 		return def
 	}
 	return n
+}
+
+// validateSecrets recusa combinações ambíguas ou inseguras de configuração de segredos.
+func (c Config) validateSecrets() []error {
+	var errs []error
+	switch c.SecretsProvider {
+	case "env":
+		if c.WebhookSecretsRef != "" || c.DatabasePasswordRef != "" {
+			errs = append(errs, errors.New("WEBHOOK_SECRETS_REF/DATABASE_PASSWORD_REF exigem SECRETS_PROVIDER vault ou awssm"))
+		}
+	case "vault", "awssm":
+		if c.WebhookSecretsRef == "" {
+			errs = append(errs, errors.New("WEBHOOK_SECRETS_REF é obrigatório com SECRETS_PROVIDER="+c.SecretsProvider))
+		}
+		if len(c.WebhookSecrets) > 0 {
+			errs = append(errs, errors.New("WEBHOOK_SECRETS e WEBHOOK_SECRETS_REF definidos juntos: escolha uma origem"))
+		}
+		if c.SecretsProvider == "vault" && c.VaultToken != "" && c.AppEnv == "production" {
+			errs = append(errs, errors.New("VAULT_TOKEN é só para dev: em production use VAULT_K8S_ROLE"))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("SECRETS_PROVIDER: expected env, vault or awssm, got %q", c.SecretsProvider))
+	}
+	return errs
 }

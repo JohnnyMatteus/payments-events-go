@@ -113,7 +113,7 @@ func runMigrate(ctx context.Context, cfg config.Config, logger *slog.Logger) err
 	if err := cfg.Require("DATABASE_URL"); err != nil {
 		return err
 	}
-	pool, err := postgres.Connect(ctx, cfg.DatabaseURL)
+	pool, err := openPool(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
