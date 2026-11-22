@@ -150,3 +150,25 @@ func TestEventListAndTrail(t *testing.T) {
 		t.Fatalf("PipelineHealth: %v", err)
 	}
 }
+
+func TestObjectClaimsAreAtomicAndReleasable(t *testing.T) {
+	testinfra.ResetDatabase(t, pool)
+	ctx := context.Background()
+	claims := postgres.NewObjectClaims(pool)
+	first, err := claims.Claim(ctx, "b", "settlements/2026-11-20.csv", "v1")
+	if err != nil || !first {
+		t.Fatalf("first claim = %v, %v", first, err)
+	}
+	if again, err := claims.Claim(ctx, "b", "settlements/2026-11-20.csv", "v1"); err != nil || again {
+		t.Fatalf("second claim = %v, %v, want false", again, err)
+	}
+	if other, err := claims.Claim(ctx, "b", "settlements/2026-11-20.csv", "v2"); err != nil || !other {
+		t.Fatalf("new version claim = %v, %v", other, err)
+	}
+	if err := claims.Release(ctx, "b", "settlements/2026-11-20.csv", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := claims.Claim(ctx, "b", "settlements/2026-11-20.csv", "v1"); err != nil || !again {
+		t.Fatalf("claim after release = %v, %v", again, err)
+	}
+}

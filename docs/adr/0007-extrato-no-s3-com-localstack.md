@@ -12,7 +12,7 @@ O PagaFácil Sandbox entrega o extrato de liquidação diário como CSV num buck
 - Porta `app.StatementReader` (`ReadStatement(ctx, ref)`), implementada por `csvstatement.Reader`, que combina um `Opener` com o parser CSV.
 - `objectstore.Opener` resolve a referência: `s3://bucket/chave` vai para o S3 pelo SDK v2 da AWS; qualquer outro valor é caminho local (útil para reprocessar um arquivo recebido por outro canal).
 - Endpoint configurável: `S3_ENDPOINT` vazio usa a AWS real; preenchido aponta para o emulador. `S3_USE_PATH_STYLE=true` para o LocalStack. Credenciais pela cadeia padrão do SDK (variáveis, perfil, IAM role).
-- No ambiente local, **LocalStack 4.5.0** só com S3 (`SERVICES=s3`). O bootstrap `init/aws/01-statements-bucket.sh` (montado em `/etc/localstack/init/ready.d`) cria o bucket com versionamento; o healthcheck do contêiner só passa quando o bucket existe. `make seed` publica um extrato de exemplo.
+- No ambiente local, **LocalStack 4.5.0** com S3 e SQS (`SERVICES=s3,sqs`; a fila de notificações está no [ADR 0012](0012-disparo-automatico-da-conciliacao.md)). O bootstrap `init/aws/01-statements-bucket.sh` (montado em `/etc/localstack/init/ready.d`) cria o bucket com versionamento; o healthcheck do contêiner só passa quando o bucket existe. `make seed` publica um extrato de exemplo.
 - Testes de integração sobem o mesmo LocalStack via testcontainers.
 
 ## Consequências

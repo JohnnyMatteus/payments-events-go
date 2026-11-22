@@ -29,6 +29,7 @@ x-app: &app
     AWS_ACCESS_KEY_ID: test
     AWS_SECRET_ACCESS_KEY: test
     STATEMENTS_BUCKET: pagafacil-statements
+    STATEMENTS_QUEUE_URL: http://localstack:4566/000000000000/pagafacil-statements-events
 
 services:
   postgres:
@@ -95,7 +96,7 @@ services:
     image: localstack/localstack:4.5.0
     profiles: [core]
     environment:
-      SERVICES: s3
+      SERVICES: s3,sqs
       AWS_DEFAULT_REGION: us-east-1
     ports: ["${LOCALSTACK_PORT:-4567}:4566"]
     volumes:
@@ -103,7 +104,7 @@ services:
       - localstack-data:/var/lib/localstack
     networks: [payments-net]
     healthcheck:
-      test: ["CMD-SHELL", "awslocal s3api head-bucket --bucket pagafacil-statements"]
+      test: ["CMD-SHELL", "awslocal s3api head-bucket --bucket pagafacil-statements && awslocal sqs get-queue-url --queue-name pagafacil-statements-events"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -177,6 +178,45 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+
+  # Concilia sozinho cada extrato que chega ao bucket (S3 -> SQS -> este processo).
+  watcher:
+    <<: *app
+    profiles: [core]
+    command: ["watch"]
+    environment:
+      <<: *app-env
+      OPS_ADDR: ":9090"
+    ports: ["${WATCHER_OPS_PORT:-9103}:9090"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      localstack: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/payments", "healthcheck", "http://127.0.0.1:9090/readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Cron simples: concilia o dia anterior todo dia às 03:00 UTC (RECONCILE_CRON).
+  scheduler:
+    build:
+      context: .
+      target: scheduler
+      args:
+        VERSION: ${APP_VERSION:-dev}
+    image: payments-events-scheduler:${APP_VERSION:-dev}
+    profiles: [core]
+    networks: [payments-net]
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      RECONCILE_CRON: ${RECONCILE_CRON:-0 3 * * *}
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      localstack: {condition: service_healthy}
+    deploy:
+      resources:
+        limits: {cpus: "0.25", memory: 64M}
 
   # Painel Razão: nginx servindo o build e encaminhando /api para a API.
   web:

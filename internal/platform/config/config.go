@@ -37,8 +37,9 @@ type Config struct {
 	AWSRegion      string
 	S3UsePathStyle bool
 
-	StatementsBucket string
-	OperatorTokens   []string
+	StatementsBucket   string
+	StatementsQueueURL string
+	OperatorTokens     []string
 
 	RedisURL            string
 	IdempotencyClaimTTL time.Duration
@@ -78,8 +79,9 @@ func Load(getenv func(string) string) (Config, error) {
 		AWSRegion:      p.str("AWS_REGION", "us-east-1"),
 		S3UsePathStyle: p.boolean("S3_USE_PATH_STYLE", false),
 
-		StatementsBucket: p.str("STATEMENTS_BUCKET", "pagafacil-statements"),
-		OperatorTokens:   p.list("OPERATOR_TOKENS"),
+		StatementsBucket:   p.str("STATEMENTS_BUCKET", "pagafacil-statements"),
+		StatementsQueueURL: p.str("STATEMENTS_QUEUE_URL", ""),
+		OperatorTokens:     p.list("OPERATOR_TOKENS"),
 
 		RedisURL:            p.str("REDIS_URL", ""),
 		IdempotencyClaimTTL: p.duration("IDEMPOTENCY_CLAIM_TTL", 30*time.Second),

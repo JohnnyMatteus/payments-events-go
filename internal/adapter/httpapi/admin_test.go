@@ -31,7 +31,9 @@ func (s *stubDeadLetters) Requeue(_ context.Context, _ app.DeadLetterSource, id 
 	s.calls = append(s.calls, op+":"+note)
 	return nil
 }
-func (s *stubDeadLetters) Discard(context.Context, app.DeadLetterSource, int64, string, string) error { return nil }
+func (s *stubDeadLetters) Discard(context.Context, app.DeadLetterSource, int64, string, string) error {
+	return nil
+}
 
 type stubCases struct {
 	app.CaseRepository

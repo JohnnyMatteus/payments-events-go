@@ -51,7 +51,7 @@ func TestRunFailsWhenRequiredVariablesAreMissing(t *testing.T) {
 func TestParseReconcileFlags(t *testing.T) {
 	t.Parallel()
 	var stderr bytes.Buffer
-	opts, err := parseReconcileFlags([]string{"-statement", "s.csv", "-from", "2026-11-20", "-to", "2026-11-21", "-format", "json"}, &stderr)
+	opts, err := parseReconcileFlags([]string{"-statement", "s.csv", "-from", "2026-11-20", "-to", "2026-11-21", "-format", "json"}, &stderr, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestParseReconcileFlags(t *testing.T) {
 		t.Fatalf("opts = %+v", opts)
 	}
 
-	opts, err = parseReconcileFlags([]string{"-statement", "s.csv", "-from", "2026-11-20"}, &stderr)
+	opts, err = parseReconcileFlags([]string{"-statement", "s.csv", "-from", "2026-11-20"}, &stderr, time.Now())
 	if err != nil || !opts.period.To.Equal(time.Date(2026, 11, 21, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("single day: %+v, %v", opts, err)
 	}
@@ -72,9 +72,26 @@ func TestParseReconcileFlags(t *testing.T) {
 		{"-statement", "s.csv", "-from", "2026-11-20", "-to", "2026-11-19"},
 		{"-statement", "s.csv", "-from", "2026-11-20", "-format", "xml"},
 	} {
-		if _, err := parseReconcileFlags(args, &stderr); err == nil {
+		if _, err := parseReconcileFlags(args, &stderr, time.Now()); err == nil {
 			t.Errorf("args %v should fail", args)
 		}
+	}
+}
+
+func TestParseReconcileDailyUsesYesterdayUTC(t *testing.T) {
+	t.Parallel()
+	var stderr bytes.Buffer
+	now := time.Date(2026, 11, 22, 1, 30, 0, 0, time.UTC)
+	opts, err := parseReconcileFlags([]string{"-daily"}, &stderr, now)
+	if err != nil || !opts.daily {
+		t.Fatalf("opts = %+v, err = %v", opts, err)
+	}
+	if want := time.Date(2026, 11, 21, 0, 0, 0, 0, time.UTC); !opts.period.From.Equal(want) ||
+		!opts.period.To.Equal(want.AddDate(0, 0, 1)) {
+		t.Fatalf("period = %+v, want the day %v", opts.period, want)
+	}
+	if _, err := parseReconcileFlags([]string{"-daily", "-from", "2026-11-20"}, &stderr, now); err == nil {
+		t.Fatal("-daily with -from must fail")
 	}
 }
 
