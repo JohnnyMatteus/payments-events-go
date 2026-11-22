@@ -12,7 +12,7 @@ Processador de webhooks do provedor fictício **PagaFácil Sandbox**: ledger ide
 - Nunca commitar segredos. Valores de desenvolvimento ficam no `docker-compose.yml`/`.env.example` marcados como `dev-only`.
 - Docs em português do Brasil; identificadores de código em inglês; comentários em português.
 - Dinheiro sempre em centavos (`int64`); nunca `float64`.
-- Ledger é append-only: nada de `UPDATE`/`DELETE` em `ledger_entries`.
+- Ledger é append-only: nada de `UPDATE`/`DELETE`/`TRUNCATE` em `ledger_entries` (gatilhos no banco desde a migração 0006); "arquivar" é exportar, nunca apagar.
 - Migrations são novas e aditivas (`internal/adapter/postgres/migrations/NNNN_*.sql`); nunca editar uma já aplicada.
 - `internal/domain` não importa nada de infraestrutura; `internal/app` só conhece portas. Adaptadores dependem de `app`, nunca o contrário.
 - Testes de integração em `*_integration_test.go` com `//go:build integration`.
@@ -29,9 +29,11 @@ make fmt                # gofmt + goimports
 make build              # bin/payments
 make up / make seed / make reconcile / make down / make clean
 make up-observability   # + Jaeger e Prometheus
+make up-oidc / up-secrets / up-grpc   # variantes: login OIDC, segredos no LocalStack, gRPC de saldo
+make retention / loadtest / proto     # retenção, carga (k6) e código gRPC
 ```
 
-CI (`.github/workflows/ci.yml`): lint, unitários, integração, build + govulncheck + docker build. Rode os mesmos comandos localmente antes de commitar.
+CI (`.github/workflows/ci.yml`): lint, unitários, painel, integração, build + govulncheck + docker build + SBOM e Trivy + promtool + helm lint/template. Rode os mesmos comandos localmente antes de commitar.
 
 ## Estrutura
 
@@ -39,7 +41,10 @@ CI (`.github/workflows/ci.yml`): lint, unitários, integração, build + govulnc
 cmd/payments/                 main, subcomandos, e2e (integration)
 internal/domain/              Event, LedgerEntry, Reconcile, money
 internal/app/                 IngestService, Relay, BalanceProjector, ReconcileService, ports.go
-internal/adapter/httpapi/     webhook, assinatura HMAC, rotas
+internal/adapter/httpapi/     webhook, assinatura HMAC, rotas, API de operação (/api/v1)
+internal/adapter/oidcauth/    verificação de token OIDC (Keycloak)
+internal/adapter/grpcapi/     gRPC interno de saldo (código gerado em balance/v1)
+internal/adapter/secretstore/ Vault e AWS Secrets Manager atrás de app.SecretStore
 internal/adapter/postgres/    recorder, outbox, ledger reader, projeção, migrations
 internal/adapter/rabbitmq/    topologia, publisher (confirms), consumer (retry/DLQ)
 internal/adapter/objectstore/ abertura de s3://... e arquivos locais
@@ -49,7 +54,10 @@ internal/adapter/reportout/   relatório texto/JSON
 internal/platform/            config (env) e observabilidade
 internal/testinfra/           testcontainers (integration)
 init/aws/                     bootstrap do LocalStack
-deploy/prometheus/            configuração de scrape
+deploy/prometheus/            configuração de scrape e alertas
+deploy/helm/, deploy/argocd/  chart e manifesto GitOps
+api/proto/, tools/            contrato gRPC e plugins fixados (make proto)
+loadtest/                     carga do webhook (k6)
 scripts/                      send-webhook.sh, seed.sh
 docs/                         design-doc, adr, roteiros, observabilidade
 ```

@@ -48,6 +48,9 @@ func NewConsumer(url string, topology Topology, cfg ConsumerConfig, logger *slog
 	if err != nil {
 		return nil, fmt.Errorf("create consumer metric: %w", err)
 	}
+	for _, outcome := range []string{"acked", "requeued", "dead_lettered"} {
+		outcomes.Add(context.Background(), 0, metric.WithAttributes(attribute.String("outcome", outcome)))
+	}
 	return &Consumer{
 		url: url, topology: topology, cfg: cfg, logger: logger,
 		tracer: otel.Tracer(instrumentationName), outcomes: outcomes,

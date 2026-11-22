@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -41,6 +42,26 @@ func runRelay(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 
 	metrics, err := observability.NewRelayMetrics()
 	if err != nil {
+		return err
+	}
+	reader := postgres.NewOperationsReader(pool)
+	// Gauges de estado (dead letters abertas, divergências, conciliação parada): só o relay as publica,
+	// um processo por implantação, para os alertas não dependerem de quantas réplicas da API existem.
+	if err := observability.RegisterPipelineGauges(func(ctx context.Context) (observability.PipelineSnapshot, error) {
+		h, err := reader.PipelineHealth(ctx, time.Now())
+		if err != nil {
+			return observability.PipelineSnapshot{}, err
+		}
+		s := observability.PipelineSnapshot{
+			OutboxPending: int64(h.OutboxPending), OutboxDead: int64(h.OutboxDead),
+			DeadLettersOpen: int64(h.DeadLettersOpen), OpenCases: int64(h.OpenCases),
+			OldestPendingSeconds: h.OldestPendingAge.Seconds(),
+		}
+		if h.LastReconciliationAt != nil {
+			s.LastReconciliationUnix = float64(h.LastReconciliationAt.Unix())
+		}
+		return s, nil
+	}, logger); err != nil {
 		return err
 	}
 	relay, err := app.NewRelay(app.RelayConfig{

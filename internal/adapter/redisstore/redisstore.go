@@ -59,6 +59,9 @@ func NewIdempotencyCache(client redis.UniversalClient, claimTTL, doneTTL time.Du
 	if err != nil {
 		return nil, err
 	}
+	for _, result := range []string{"acquired", "in_flight", "done", "error"} {
+		lookups.Add(context.Background(), 0, metric.WithAttributes(attribute.String("result", result)))
+	}
 	return &IdempotencyCache{client: client, claimTTL: claimTTL, doneTTL: doneTTL, lookups: lookups}, nil
 }
 

@@ -86,6 +86,14 @@ func (r *EventRecorder) Record(ctx context.Context, rec app.Recording) (outcome 
 }
 
 func record(ctx context.Context, tx pgx.Tx, rec app.Recording, payload []byte) (app.IngestOutcome, error) {
+	// O id do ledger é sorteado no INSERT, mas o commit pode sair de ordem. O lock
+	// compartilhado vai antes de tudo (nenhum lock de linha ainda) e fica até o
+	// commit, para a leitura por cursor saber quando um id é definitivo (ADR 0019).
+	if rec.Entry != nil {
+		if err := lockLedgerAppend(ctx, tx); err != nil {
+			return "", err
+		}
+	}
 	initial := app.OutcomeRecorded
 	if rec.Entry == nil {
 		initial = app.OutcomeIgnored

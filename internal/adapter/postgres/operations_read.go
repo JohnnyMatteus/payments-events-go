@@ -290,6 +290,46 @@ func (r *OperationsReader) PaymentBalances(ctx context.Context, merchantID, curs
 	return page, nil
 }
 
+// LedgerEntries lista os lançamentos por id crescente. O cursor é o id do
+// último lançamento da página anterior. Os ids são sorteados no INSERT e as
+// transações confirmam fora de ordem, então só se devolve até o limite estável
+// (stableLedgerBound): nenhum id menor ou igual a ele pode aparecer depois, e a
+// paginação não pula linha (ADR 0019).
+func (r *OperationsReader) LedgerEntries(ctx context.Context, f app.LedgerFilter) (app.Page[app.LedgerView], error) {
+	var after int64
+	if f.Cursor != "" {
+		n, err := strconv.ParseInt(f.Cursor, 10, 64)
+		if err != nil || n < 0 {
+			return app.Page[app.LedgerView]{}, fmt.Errorf("%w: cursor", app.ErrInvalidInput)
+		}
+		after = n
+	}
+	size := pageSize(f.Limit)
+	bound, err := stableLedgerBound(ctx, r.pool)
+	if err != nil {
+		return app.Page[app.LedgerView]{}, err
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, transaction_id, payment_id, COALESCE(merchant_id, ''), direction, amount_cents, currency, kind,
+			COALESCE(adjusts_transaction_id, ''), occurred_at, recorded_at
+		FROM ledger_entries
+		WHERE ($1 = '' OR merchant_id = $1) AND ($2 = '' OR payment_id = $2) AND id > $3 AND id <= $5
+		ORDER BY id LIMIT $4`, f.MerchantID, f.PaymentID, after, size+1, bound)
+	if err != nil {
+		return app.Page[app.LedgerView]{}, fmt.Errorf("query ledger entries: %w", err)
+	}
+	items, err := pgx.CollectRows(rows, pgx.RowToStructByPos[app.LedgerView])
+	if err != nil {
+		return app.Page[app.LedgerView]{}, fmt.Errorf("scan ledger entries: %w", err)
+	}
+	page := app.Page[app.LedgerView]{Items: items}
+	if len(items) > size {
+		page.Items = items[:size]
+		page.NextCursor = strconv.FormatInt(page.Items[size-1].ID, 10)
+	}
+	return page, nil
+}
+
 // PaymentBalance devolve a projeção de um pagamento, comparada ao ledger.
 func (r *OperationsReader) PaymentBalance(ctx context.Context, paymentID string) (app.PaymentBalance, error) {
 	rows, err := r.pool.Query(ctx, `
@@ -354,6 +394,10 @@ func (r *OperationsReader) PipelineHealth(ctx context.Context, now time.Time) (a
 		return h, fmt.Errorf("query reconciliation health: %w", err)
 	}
 	h.LastReconciliationAt = lastReconciliationAt
+	if err := r.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM divergence_cases WHERE status IN ('open', 'adjustment_proposed')`).Scan(&h.OpenCases); err != nil {
+		return h, fmt.Errorf("query open cases: %w", err)
+	}
 	return h, nil
 }
 

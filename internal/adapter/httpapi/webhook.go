@@ -57,6 +57,13 @@ func (p webhookPayload) toEvent() domain.Event {
 	}
 }
 
+// webhookOutcomes são todos os valores possíveis do rótulo outcome.
+var webhookOutcomes = []string{
+	"recorded", "duplicate", "ignored", "duplicate_transaction",
+	"invalid_signature", "stale_timestamp", "invalid_payload", "invalid_event",
+	"payload_too_large", "unreadable_body", "rate_limited", "error",
+}
+
 // WebhookHandler recebe eventos do provedor.
 type WebhookHandler struct {
 	verifier *Verifier
@@ -81,6 +88,11 @@ func NewWebhookHandler(verifier *Verifier, ingester Ingester, logger *slog.Logge
 		metric.WithDescription("Webhooks recebidos por resultado."))
 	if err != nil {
 		return nil, err
+	}
+	// As séries nascem em 0 (ver RelayMetrics): o primeiro erro 5xx ou a primeira
+	// assinatura inválida precisa ser visível para increase() e rate().
+	for _, outcome := range webhookOutcomes {
+		requests.Add(context.Background(), 0, metric.WithAttributes(attribute.String("outcome", outcome)))
 	}
 	h := &WebhookHandler{verifier: verifier, ingester: ingester, logger: logger, requests: requests}
 	for _, opt := range opts {

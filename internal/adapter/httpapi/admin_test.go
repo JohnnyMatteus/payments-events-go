@@ -199,3 +199,35 @@ func TestEventTrailExposesArchivedOutbox(t *testing.T) {
 		t.Fatalf("body = %s (%v)", rec.Body, err)
 	}
 }
+
+type ledgerReader struct {
+	app.OperationsReader
+	got app.LedgerFilter
+}
+
+func (r *ledgerReader) LedgerEntries(_ context.Context, f app.LedgerFilter) (app.Page[app.LedgerView], error) {
+	r.got = f
+	return app.Page[app.LedgerView]{Items: []app.LedgerView{{ID: 7, TransactionID: "tx", Direction: "credit", AmountCents: 100}}, NextCursor: "7"}, nil
+}
+
+func TestLedgerEntriesPassFiltersAndCursor(t *testing.T) {
+	reader := &ledgerReader{}
+	mux := newTestMux(t, AdminDeps{Reader: reader})
+	rec := call(mux, http.MethodGet, "/api/v1/ledger-entries?merchant_id=loja_1&payment_id=pay_1&cursor=3&limit=10", "token-da-carla", "")
+	var out struct {
+		Items      []ledgerDTO `json:"items"`
+		NextCursor string      `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusOK || len(out.Items) != 1 || out.NextCursor != "7" {
+		t.Fatalf("status %d body %s (%v)", rec.Code, rec.Body, err)
+	}
+	if reader.got != (app.LedgerFilter{MerchantID: "loja_1", PaymentID: "pay_1", Cursor: "3", Limit: 10}) {
+		t.Fatalf("filter = %+v", reader.got)
+	}
+	if rec := call(mux, http.MethodGet, "/api/v1/ledger-entries", "", ""); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("sem token: status = %d, want 401", rec.Code)
+	}
+	if rec := call(mux, http.MethodGet, "/api/v1/ledger-entries?limit=abc", "token-da-carla", ""); rec.Code != http.StatusBadRequest {
+		t.Fatalf("limit inválido: status = %d, want 400", rec.Code)
+	}
+}

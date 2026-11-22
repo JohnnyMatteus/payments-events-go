@@ -200,3 +200,43 @@ func TestPaymentBalanceReadsProjectionAndLedger(t *testing.T) {
 		t.Fatalf("PaymentBalance = %+v, %v", got, err)
 	}
 }
+
+func TestLedgerEntriesPaginateByCursor(t *testing.T) {
+	testinfra.ResetDatabase(t, pool)
+	ctx := context.Background()
+	for i, id := range []string{"a", "b", "c", "d", "e"} {
+		ev := capture("evt_"+id, "txn_"+id, int64(100+i))
+		if i%2 == 0 {
+			ev.MerchantID = "loja_1"
+		} else {
+			ev.MerchantID = "loja_2"
+		}
+		ingest(t, ev)
+	}
+	reader := postgres.NewOperationsReader(pool)
+	var seen []string
+	cursor := ""
+	for range 5 {
+		page, err := reader.LedgerEntries(ctx, app.LedgerFilter{Cursor: cursor, Limit: 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range page.Items {
+			seen = append(seen, e.TransactionID)
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	if got := len(seen); got != 5 || seen[0] != "txn_a" || seen[4] != "txn_e" {
+		t.Fatalf("seen = %v, want the five entries in order without repeats", seen)
+	}
+	filtered, err := reader.LedgerEntries(ctx, app.LedgerFilter{MerchantID: "loja_2"})
+	if err != nil || len(filtered.Items) != 2 {
+		t.Fatalf("loja_2 = %+v, %v", filtered, err)
+	}
+	if _, err := reader.LedgerEntries(ctx, app.LedgerFilter{Cursor: "x"}); !errors.Is(err, app.ErrInvalidInput) {
+		t.Fatalf("bad cursor = %v, want ErrInvalidInput", err)
+	}
+}

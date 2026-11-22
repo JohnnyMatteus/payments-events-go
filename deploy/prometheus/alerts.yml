@@ -1,0 +1,71 @@
+# Alertas sugeridos no design doc (seção 8). Os limiares são pontos de partida:
+# ajuste depois de ver o tráfego real. Cada regra tem um caso em alerts_test.yml
+# (`promtool test rules`, no CI). Os contadores nascem em 0 no processo, para a
+# primeira ocorrência ser vista por increase().
+groups:
+  - name: payments-events-go
+    rules:
+      - alert: OutboxMessageDead
+        expr: increase(outbox_dead_total[15m]) > 0
+        labels: {severity: page}
+        annotations:
+          summary: Mensagem do outbox esgotou as tentativas
+          description: Há mensagens em status dead; reprocesse ou descarte pelo painel (DLQ).
+
+      - alert: OutboxPublishLagHigh
+        expr: histogram_quantile(0.99, sum by (le) (rate(outbox_publish_lag_seconds_bucket[5m]))) > 30
+        for: 5m
+        labels: {severity: warn}
+        annotations:
+          summary: p99 do atraso de publicação do outbox acima de 30 s
+          description: O relay está atrasado ou o broker está instável.
+
+      - alert: WebhookInvalidSignatureHigh
+        expr: sum(rate(webhook_requests_total{outcome="invalid_signature"}[5m])) > 0.5
+        for: 10m
+        labels: {severity: warn}
+        annotations:
+          summary: Muitos webhooks com assinatura inválida
+          description: Tentativa de forjar eventos ou segredo desalinhado com o provedor (confira a rotação).
+
+      - alert: WebhookErrors
+        expr: sum(rate(webhook_requests_total{outcome="error"}[5m])) > 0
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: Webhooks respondendo erro 5xx
+          description: O provedor vai reenviar; confira o banco e os logs da API.
+
+      - alert: DeadLetterQueueNotEmpty
+        # O endpoint agregado (/metrics) não traz métrica por fila; esta vem de
+        # /metrics/detailed?family=queue_coarse_metrics (prefixo rabbitmq_detailed_).
+        # O consumidor da DLQ arquiva a mensagem e a retira da fila: se ela fica parada, o arquivamento está falhando.
+        expr: rabbitmq_detailed_queue_messages{queue="balance-projector.dlq"} > 0
+        for: 5m
+        labels: {severity: warn}
+        annotations:
+          summary: Mensagens paradas na DLQ do consumidor
+          description: "O consumidor da DLQ não está arquivando; confira os logs do consumer."
+
+      - alert: DeadLettersOpen
+        expr: max(pipeline_dead_letters_open) > 0
+        for: 5m
+        labels: {severity: warn}
+        annotations:
+          summary: Há dead letters abertas
+          description: "Trate pelo painel (DLQ): reprocessar ou descartar com motivo."
+
+      - alert: ReconciliationOpenCases
+        expr: max(reconciliation_open_cases) > 0
+        for: 30m
+        labels: {severity: warn}
+        annotations:
+          summary: Divergências da conciliação sem decisão
+          description: "Justifique ou proponha ajuste pelo painel (Conciliação)."
+
+      - alert: ReconciliationStale
+        expr: (time() - max(reconciliation_last_run_timestamp_seconds) > 129600) and (max(reconciliation_last_run_timestamp_seconds) > 0)
+        labels: {severity: warn}
+        annotations:
+          summary: A conciliação não roda há mais de 36 horas
+          description: "Confira o watcher, o agendamento e o extrato no bucket."
