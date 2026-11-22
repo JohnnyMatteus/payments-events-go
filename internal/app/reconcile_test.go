@@ -75,3 +75,36 @@ func TestReconcileServiceErrors(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+type stubComparer struct {
+	called bool
+	report domain.Report
+}
+
+func (s *stubComparer) Reconcile(context.Context, domain.Period, []domain.StatementLine) (domain.Report, error) {
+	s.called = true
+	return s.report, nil
+}
+
+// Com o comparador do banco ligado, os lançamentos do período nunca são carregados na memória.
+func TestReconcileServiceWithComparerDoesNotLoadLedgerEntries(t *testing.T) {
+	period := domain.Period{From: time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC), To: time.Date(2026, 11, 21, 0, 0, 0, 0, time.UTC)}
+	cmp := &stubComparer{report: domain.Report{Matched: 7}}
+	svc := NewReconcileService(&stubStatements{}, panicLedger{}).WithComparer(cmp)
+	report, err := svc.Reconcile(t.Context(), period, "s3://b/k.csv")
+	if err != nil || !cmp.called || report.Matched != 7 {
+		t.Fatalf("report = %+v, %v, called = %v", report, err, cmp.called)
+	}
+}
+
+type stubStatements struct{}
+
+func (stubStatements) ReadStatement(context.Context, string) ([]domain.StatementLine, error) {
+	return nil, nil
+}
+
+type panicLedger struct{}
+
+func (panicLedger) EntriesBetween(context.Context, time.Time, time.Time) ([]domain.LedgerEntry, error) {
+	panic("EntriesBetween não deve ser chamado com o comparador do banco")
+}

@@ -25,3 +25,4 @@ Formato: Contexto, Decisão, Consequências e Alternativas. Um ADR por decisão;
 | [0019](0019-leitura-do-razao-por-cursor-sem-pular-linhas.md) | Leitura do razão por cursor sem pular linhas (lock de ordem entre escritores e leitor) | Aceito |
 | [0020](0020-testes-de-mutacao-no-dominio.md) | Testes de mutação no domínio (gremlins, eficácia mínima de 90%) | Aceito |
 | [0021](0021-listen-notify-para-acordar-o-relay.md) | LISTEN/NOTIFY para acordar o relay, com polling como rede de segurança | Aceito |
+| [0022](0022-conciliacao-no-banco-para-volumes-grandes.md) | Conciliação no banco para volumes grandes (RECONCILE_MODE=sql), equivalente à em memória | Aceito |

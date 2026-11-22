@@ -178,21 +178,37 @@ func Reconcile(period Period, statement []StatementLine, ledger []LedgerEntry) R
 		})
 	}
 
-	slices.SortFunc(report.Matches, func(a, b Match) int {
+	report.Finalize()
+	return report
+}
+
+// Finalize põe o resultado na ordem determinística: pares por linha do
+// extrato e divergências por tipo, transação e linha. Quem monta um Report por
+// outro caminho (a comparação no banco) o chama no fim, para o resultado ser
+// idêntico ao de Reconcile.
+func (r *Report) Finalize() {
+	slices.SortFunc(r.Matches, func(a, b Match) int {
 		return cmp.Or(
 			cmp.Compare(a.Statement.LineNumber, b.Statement.LineNumber),
 			cmp.Compare(a.Statement.TransactionID, b.Statement.TransactionID),
 		)
 	})
-	slices.SortFunc(report.Divergences, func(a, b Divergence) int {
+	slices.SortFunc(r.Divergences, func(a, b Divergence) int {
 		return cmp.Or(
 			cmp.Compare(a.Kind, b.Kind),
 			cmp.Compare(a.TransactionID, b.TransactionID),
 			cmp.Compare(lineNumber(a), lineNumber(b)),
 		)
 	})
-	return report
 }
+
+// CompareLine diz o que difere entre a linha do extrato e o lançamento efetivo
+// do ledger (vazio se batem). É a regra única usada pela comparação em memória
+// e pela feita no banco.
+func CompareLine(line StatementLine, entry LedgerEntry) string { return compare(line, entry) }
+
+// SignedCents devolve o valor com sinal: positivo para crédito, negativo para débito.
+func (l StatementLine) SignedCents() int64 { return l.signedCents() }
 
 // effectiveEntries agrupa os lançamentos do período por transação, somando
 // cada ajuste à transação que ele corrige. O lançamento efetivo carrega o

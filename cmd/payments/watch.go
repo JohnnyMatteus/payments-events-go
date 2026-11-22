@@ -7,7 +7,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/csvstatement"
 	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/httpapi"
 	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/objectstore"
 	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/postgres"
@@ -48,7 +47,7 @@ func runWatch(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 	if err != nil {
 		return err
 	}
-	reconcile := app.NewReconcileService(csvstatement.NewReader(opener), postgres.NewLedgerReader(pool))
+	reconcile := newReconcileService(cfg, opener, pool)
 	runner := app.NewReconciliationRunner(opener.Statements(cfg.StatementsBucket), reconcile,
 		postgres.NewReconciliationStore(pool), logger)
 	watcher := app.NewStatementWatcher(queue, postgres.NewObjectClaims(pool), runner, logger)
