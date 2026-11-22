@@ -132,6 +132,7 @@ LocalStack, o relatório de conciliação (faltando, sobrando e valor divergente
 | OpenTelemetry (traces OTLP e métricas Prometheus) e slog | [0008](docs/adr/0008-observabilidade-opentelemetry.md) |
 | Testes de integração com testcontainers sob build tag | [0009](docs/adr/0009-testes-de-integracao-com-testcontainers.md) |
 | Redis como atalho de idempotência (o Postgres segue como garantia) e limite por lojista, fail-open | [0010](docs/adr/0010-redis-atalho-de-idempotencia-e-rate-limit.md) |
+| Painel de operação: token por operador e ajustes de ledger com aprovação de outra pessoa | [0011](docs/adr/0011-autenticacao-de-operador-e-quatro-olhos.md) |
 
 Padrões de projeto e SOLID com os trechos reais do código: [docs/arquitetura/padroes.md](docs/arquitetura/padroes.md).
 
