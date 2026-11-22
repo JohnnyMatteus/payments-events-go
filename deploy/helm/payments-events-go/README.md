@@ -1,10 +1,35 @@
-# Chart Helm (rascunho)
+# Chart Helm
 
-Rascunho para a próxima fase (Kubernetes e Helm estão fora do escopo da fundação). Gera Deployments para `api`, `relay` e `consumer`, um Service para a API e um CronJob de conciliação.
+Renderiza:
+
+| Recurso | O que é |
+| --- | --- |
+| Deployments `api`, `relay`, `consumer`, `watcher` | os processos do binário; probes `startup`, `liveness` (`/healthz`) e `readiness` (`/readyz`), `securityContext` restrito, métricas em `/metrics` (anotações do Prometheus) |
+| Service da API | HTTP na 80 e, com `grpc.enabled`, gRPC (ADR 0016) |
+| HPA (API) | CPU, de `autoscaling.minReplicas` a `maxReplicas`; com ele ligado o Deployment não fixa `replicas` |
+| PodDisruptionBudget (API) | `minAvailable` |
+| Job de migração | `payments migrate`, hook `pre-install,pre-upgrade` (o ArgoCD o roda como PreSync). Usa a SA `default` sem token, porque os recursos comuns do chart (ServiceAccount) ainda não existem quando o hook roda numa instalação nova; o Secret `existingSecret` também precisa existir antes |
+| CronJob de conciliação | `payments reconcile -daily -fail-on-divergence` (dia anterior, UTC) |
+| CronJob de retenção | `payments retention` (ADR 0015) |
+| NetworkPolicy (opcional) | entrada na API só de `networkPolicy.ingressFrom` |
+
+## Segredos
+
+O chart não cria segredos. `existingSecret` deve trazer `DATABASE_URL`, `RABBITMQ_URL` e, com `secrets.provider=env`,
+`WEBHOOK_SECRETS`. Com `vault` ou `awssm` o segredo do webhook (e opcionalmente a senha do banco) vem do cofre
+(ADR 0014); em `APP_ENV=production` o Vault exige `secrets.vault.k8sRole` (o token estático é só para dev).
+
+## Verificação
+
+Sem cluster nesta máquina nada foi aplicado. O CI renderiza o chart (`helm lint` e `helm template` com
+`ci/values-ci.yaml` e outras combinações) e valida o YAML gerado; renderização não prova que o cluster aceita os recursos.
 
 ```bash
-docker run --rm -v "$PWD:/chart" -w /chart alpine/helm:3.17.0 lint deploy/helm/payments-events-go
-docker run --rm -v "$PWD:/chart" -w /chart alpine/helm:3.17.0 template demo deploy/helm/payments-events-go
+docker run --rm -v "$PWD:/chart" -w /chart alpine/helm:3.17.0 template demo deploy/helm/payments-events-go -f deploy/helm/payments-events-go/ci/values-ci.yaml
 ```
 
-Pendências: cálculo da data do dia anterior no CronJob, HPA, PodDisruptionBudget, NetworkPolicy, Job de migração (hook `pre-upgrade`) e integração com ArgoCD.
+## Fora do chart
+
+- O painel (`web/`) não está no chart: o `nginx.conf` dele encaminha `/api` para o host `api`, que no cluster é
+  `<release>-api`. Ajustar o proxy (ou servir o painel atrás do mesmo Ingress) é decisão de deploy.
+- Ingress, certificados e a criação do Secret TLS do gRPC ficam com a plataforma.

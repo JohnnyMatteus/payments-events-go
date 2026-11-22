@@ -99,6 +99,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          # O token do checkout não deve ficar em disco para os passos seguintes (scanners de terceiros rodam aqui).
+          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -108,7 +111,77 @@ jobs:
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
       - name: docker build
         run: docker build --build-arg VERSION=${{ github.sha }} -t payments-events-go:ci .
+      - name: Exportar a imagem (entrada do SBOM e do scan)
+        run: |
+          set -euo pipefail
+          # Diretórios só para isto: nunca monte o RUNNER_TEMP inteiro em imagem de terceiros (ele guarda os arquivos
+          # de comando do runner, como GITHUB_ENV e GITHUB_PATH, e credenciais de passos anteriores).
+          mkdir -p "$RUNNER_TEMP/scan/in" "$RUNNER_TEMP/scan/sbom"
+          docker save payments-events-go:ci -o "$RUNNER_TEMP/scan/in/image.tar"
+      - name: SBOM (syft, SPDX e CycloneDX)
+        run: |
+          set -euo pipefail
+          # Imagem fixada por digest do índice multi-arquitetura (ADR 0018). A imagem entra somente leitura; a saída vai
+          # para um diretório separado.
+          docker run --rm --security-opt no-new-privileges \
+            -v "$RUNNER_TEMP/scan/in:/in:ro" -v "$RUNNER_TEMP/scan/sbom:/out" \
+            anchore/syft:v1.57.2@sha256:e97e20b6e6d1699c60296b66ab337941724f9bd06ac279d893eda89601fc4b2a \
+            scan docker-archive:/in/image.tar -o spdx-json=/out/sbom.spdx.json -o cyclonedx-json=/out/sbom.cdx.json
+          # Um SBOM vazio passaria despercebido: o binário Go tem de listar as dependências do módulo.
+          for f in sbom.spdx.json sbom.cdx.json; do
+            grep -q 'jackc/pgx' "$RUNNER_TEMP/scan/sbom/$f" || { echo "$f não lista github.com/jackc/pgx"; exit 1; }
+          done
+      - uses: actions/upload-artifact@v6
+        with:
+          name: sbom
+          path: |
+            ${{ runner.temp }}/scan/sbom/sbom.spdx.json
+            ${{ runner.temp }}/scan/sbom/sbom.cdx.json
+      - name: Trivy (vulnerabilidades HIGH e CRITICAL com correção disponível)
+        run: |
+          # Só leitura sobre a imagem exportada; o Trivy não escreve em nenhum diretório do runner (só no cache do contêiner).
+          docker run --rm --security-opt no-new-privileges -v "$RUNNER_TEMP/scan/in:/in:ro" \
+            aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb \
+            image --input /in/image.tar --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress
       - name: docker compose config
         run: docker compose --profile core --profile observability --profile tools config --quiet
-      - name: helm lint (rascunho do chart)
-        run: docker run --rm -v "$PWD:/chart" -w /chart alpine/helm:3.17.0 lint deploy/helm/payments-events-go
+      - name: helm lint e template
+        run: |
+          set -euo pipefail
+          chart=deploy/helm/payments-events-go
+          helm() { docker run --rm -v "$PWD:/chart" -w /chart alpine/helm:3.17.0 "$@"; }
+          helm lint "$chart"
+          helm lint "$chart" -f "$chart/ci/values-ci.yaml"
+          helm template demo "$chart" -f "$chart/ci/values-ci.yaml" > "$RUNNER_TEMP/rendered.yaml"
+          helm template demo "$chart" --set autoscaling.enabled=false --set watcher.enabled=false \
+            --set migrate.enabled=false --set retention.enabled=false --set reconcile.enabled=false > "$RUNNER_TEMP/minimal.yaml"
+          helm template demo "$chart" --set secrets.provider=vault --set secrets.webhookRef=payments/webhook#secrets \
+            --set secrets.vault.addr=https://vault.example.com --set secrets.vault.k8sRole=payments > "$RUNNER_TEMP/vault.yaml"
+          ruby -ryaml -e 'ARGV.each { |f| YAML.load_stream(File.read(f)) }' "$RUNNER_TEMP/rendered.yaml" "$RUNNER_TEMP/minimal.yaml" "$RUNNER_TEMP/vault.yaml"
+          for kind in HorizontalPodAutoscaler PodDisruptionBudget NetworkPolicy CronJob Job; do
+            grep -q "^kind: $kind$" "$RUNNER_TEMP/rendered.yaml" || { echo "faltou $kind no render completo"; exit 1; }
+          done
+          for probe in startupProbe livenessProbe readinessProbe; do
+            [ "$(grep -c "$probe:" "$RUNNER_TEMP/rendered.yaml")" -ge 4 ] || { echo "$probe ausente em algum Deployment"; exit 1; }
+          done
+          grep -q -- 'reconcile", "-daily"' "$RUNNER_TEMP/rendered.yaml" || { echo "CronJob de conciliação sem -daily"; exit 1; }
+          # O hook de migração não pode depender de recurso comum do chart (ServiceAccount): ele roda antes de existirem.
+          ruby -ryaml -e '
+            docs = YAML.load_stream(File.read(ARGV[0])).compact
+            hook = ->(d) { d.dig("metadata", "annotations", "helm.sh/hook") }
+            chart_sas = docs.select { |d| d["kind"] == "ServiceAccount" && !hook.(d) }.map { |d| d.dig("metadata", "name") }
+            jobs = docs.select { |d| d["kind"] == "Job" && hook.(d) }
+            abort("sem Job de hook") if jobs.empty?
+            jobs.each do |j|
+              sa = j.dig("spec", "template", "spec", "serviceAccountName")
+              abort("o hook usa a SA do chart (#{sa}), que ainda não existe na instalação nova") if chart_sas.include?(sa)
+              abort("o hook monta token de SA sem precisar") unless j.dig("spec", "template", "spec", "automountServiceAccountToken") == false
+            end
+            abort("sem ServiceAccount no render completo") if chart_sas.empty?
+          ' "$RUNNER_TEMP/rendered.yaml"
+          if grep -q OPERATOR_TOKENS "$RUNNER_TEMP/rendered.yaml"; then echo "token de dev no chart"; exit 1; fi
+          if grep -q "^kind: HorizontalPodAutoscaler$" "$RUNNER_TEMP/minimal.yaml"; then echo "HPA com autoscaling desligado"; exit 1; fi
+          # Vault sem k8sRole e provider sem referência têm de falhar a renderização.
+          if helm template demo "$chart" --set secrets.provider=vault --set secrets.webhookRef=a#b --set secrets.vault.addr=https://v >/dev/null 2>&1; then
+            echo "vault sem k8sRole deveria falhar"; exit 1
+          fi

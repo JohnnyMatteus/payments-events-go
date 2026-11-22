@@ -1,0 +1,46 @@
+{{- if .Values.migrate.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "payments.fullname" . }}-migrate
+  labels:
+    {{- include "payments.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    # O Helm roda antes de instalar/atualizar; o ArgoCD trata o hook do Helm como PreSync.
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        {{- include "payments.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      # O ServiceAccount do chart é um recurso comum e só nasce depois dos hooks pre-install,
+      # então o Job usa uma SA que já existe (a default do namespace), sem token. Só o login no
+      # Vault por Kubernetes para a senha do banco precisa de token: nesse caso, informe em
+      # migrate.serviceAccountName uma SA pré-existente com o papel no Vault.
+      {{- $needsToken := and (eq .Values.secrets.provider "vault") .Values.secrets.databasePasswordRef }}
+      {{- if and $needsToken (eq .Values.migrate.serviceAccountName "default") }}
+      {{- fail "com secrets.provider=vault e secrets.databasePasswordRef, defina migrate.serviceAccountName (SA que já existe antes do hook e tem o papel no Vault)" }}
+      {{- end }}
+      serviceAccountName: {{ .Values.migrate.serviceAccountName }}
+      automountServiceAccountToken: {{ if $needsToken }}true{{ else }}false{{ end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- include "payments.podSecurityContext" . | nindent 6 }}
+      containers:
+        - name: migrate
+          image: {{ include "payments.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["migrate"]
+          {{- include "payments.env" . | nindent 10 }}
+          {{- include "payments.securityContext" . | nindent 10 }}
+{{- end }}
