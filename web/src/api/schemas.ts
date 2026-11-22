@@ -222,4 +222,4 @@ export const caseSchema = z.object({
 });
 export type Case = z.infer<typeof caseSchema>;
 
-export const meSchema = z.object({ operator: z.string() });
+export const meSchema = z.object({ operator: z.string(), role: z.enum(['leitor', 'operador']) });

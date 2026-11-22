@@ -67,3 +67,15 @@ describe('DLQ', () => {
     expect(deliveryLabel(3)).toBe('2 reenvios descartados');
   });
 });
+
+describe('papel do operador', () => {
+  it('só o operador executa ações; o leitor não', async () => {
+    const { canAct, role } = await import('@/auth/session');
+    role.value = null;
+    expect(canAct.value).toBe(false);
+    role.value = 'leitor';
+    expect(canAct.value).toBe(false);
+    role.value = 'operador';
+    expect(canAct.value).toBe(true);
+  });
+});

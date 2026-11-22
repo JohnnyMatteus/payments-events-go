@@ -4,7 +4,7 @@ import { ApiError } from '@/api/client';
 import { useApprove, useCase, useExplain, usePropose, useReject, useTrail } from '@/api/queries';
 import ReasonDialog from '@/components/ReasonDialog.vue';
 import Money from '@/components/signature/Money.vue';
-import { operator } from '@/auth/session';
+import { canAct, operator } from '@/auth/session';
 import { formatDateTime } from '@/domain/format';
 import { deliveryLabel, outboxLabel } from '@/domain/status';
 import { stateLabel, type RowState } from '@/domain/ledger';
@@ -107,7 +107,7 @@ const signed = (s: { direction: string; amount_cents: number }) => (s.direction 
         </div>
       </section>
 
-      <section v-if="!closed" class="actions">
+      <section v-if="!closed && canAct" class="actions">
         <template v-if="pending">
           <v-btn color="primary" variant="flat" :disabled="mine" @click="act = 'approve'">Aprovar ajuste</v-btn>
           <v-btn @click="act = 'reject'">Recusar</v-btn>

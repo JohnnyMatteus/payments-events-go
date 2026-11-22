@@ -3,7 +3,7 @@ import { ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { get } from '@/api/client';
 import { meSchema } from '@/api/schemas';
-import { operator, setToken } from '@/auth/session';
+import { operator, role, setToken } from '@/auth/session';
 
 const route = useRoute();
 const router = useRouter();
@@ -16,7 +16,9 @@ async function enter() {
   error.value = '';
   setToken(value.value.trim());
   try {
-    operator.value = (await get(meSchema, '/me')).operator;
+    const me = await get(meSchema, '/me');
+    operator.value = me.operator;
+    role.value = me.role;
     await router.replace(typeof route.query['voltar'] === 'string' ? route.query['voltar'] : '/');
   } catch {
     setToken(null);

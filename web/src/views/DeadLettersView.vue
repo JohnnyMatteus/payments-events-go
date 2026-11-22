@@ -4,6 +4,7 @@ import { computed, ref } from 'vue';
 import { ApiError } from '@/api/client';
 import { useDeadLetters, useDiscard, useReprocess } from '@/api/queries';
 import type { DeadLetter } from '@/api/schemas';
+import { canAct } from '@/auth/session';
 import ReasonDialog from '@/components/ReasonDialog.vue';
 import AgeHistogram from '@/components/signature/AgeHistogram.vue';
 import { formatAge, formatDateTime } from '@/domain/format';
@@ -89,7 +90,7 @@ const firstLine = (s: string) => s.split('\n')[0] ?? '';
           <div class="colhead mb-1">Idade das mensagens abertas</div>
           <AgeHistogram :ages="open.map((d) => d.age_seconds)" />
         </div>
-        <div class="actions">
+        <div v-if="canAct" class="actions">
           <div class="colhead mb-1">Ações por lote</div>
           <div class="meta mb-2">{{ selection.length }} selecionada{{ selection.length === 1 ? '' : 's' }}</div>
           <div class="d-flex ga-2 flex-wrap">
@@ -106,7 +107,7 @@ const firstLine = (s: string) => s.split('\n')[0] ?? '';
           <h2>{{ reasonLabel(reason) }}</h2>
           <span class="meta mono">{{ group.length }}</span>
           <v-spacer />
-          <v-btn v-if="group.some((g) => g.status === 'open')" size="x-small" variant="text" @click="pickAll(group, !group.filter((g) => g.status === 'open').every((g) => picked.has(key(g))))">
+          <v-btn v-if="canAct && group.some((g) => g.status === 'open')" size="x-small" variant="text" @click="pickAll(group, !group.filter((g) => g.status === 'open').every((g) => picked.has(key(g))))">
             Selecionar o grupo
           </v-btn>
         </div>
@@ -126,7 +127,7 @@ const firstLine = (s: string) => s.split('\n')[0] ?? '';
             <template v-for="d in group" :key="key(d)">
               <tr class="clickable" @click="expanded = expanded === key(d) ? null : key(d)">
                 <td @click.stop>
-                  <v-checkbox-btn v-if="d.status === 'open'" :model-value="picked.has(key(d))" density="compact" :aria-label="`Selecionar ${d.message_id}`" @update:model-value="toggle(d)" />
+                  <v-checkbox-btn v-if="canAct && d.status === 'open'" :model-value="picked.has(key(d))" density="compact" :aria-label="`Selecionar ${d.message_id}`" @update:model-value="toggle(d)" />
                 </td>
                 <td class="mono">{{ d.message_id }}</td>
                 <td>{{ d.source === 'broker' ? 'DLQ do broker' : 'Outbox' }}</td>

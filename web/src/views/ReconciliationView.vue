@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue';
 import { ApiError } from '@/api/client';
 import { useLatestRun, usePendingAdjustments, useRunItems, useStartRun, useStatements, useUploadStatement } from '@/api/queries';
 import type { RunItem } from '@/api/schemas';
+import { canAct } from '@/auth/session';
 import CaseDrawer from '@/components/CaseDrawer.vue';
 import LedgerSpread from '@/components/signature/LedgerSpread.vue';
 import Money from '@/components/signature/Money.vue';
@@ -82,8 +83,8 @@ const noRun = computed(() => run.isError.value);
       <div class="controls">
         <v-text-field v-model="date" type="date" label="Data de liquidação" style="width: 170px" />
         <input ref="fileInput" type="file" accept=".csv,text/csv" hidden @change="onFile" />
-        <v-btn :prepend-icon="mdiUpload" :loading="upload.isPending.value" @click="fileInput?.click()">Enviar extrato</v-btn>
-        <v-btn color="primary" variant="flat" :prepend-icon="mdiPlay" :loading="start.isPending.value" :disabled="!statement" @click="execute">Executar conciliação</v-btn>
+        <v-btn v-if="canAct" :prepend-icon="mdiUpload" :loading="upload.isPending.value" @click="fileInput?.click()">Enviar extrato</v-btn>
+        <v-btn v-if="canAct" color="primary" variant="flat" :prepend-icon="mdiPlay" :loading="start.isPending.value" :disabled="!statement" @click="execute">Executar conciliação</v-btn>
       </div>
     </header>
 

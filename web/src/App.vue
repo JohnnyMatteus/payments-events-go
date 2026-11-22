@@ -4,7 +4,7 @@ import { useStorage } from '@vueuse/core';
 import { watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useTheme } from 'vuetify';
-import { operator, setToken, token } from '@/auth/session';
+import { operator, role, setToken, token } from '@/auth/session';
 import { useMe } from '@/api/queries';
 import PipelineStrip from '@/components/PipelineStrip.vue';
 
@@ -24,7 +24,10 @@ const me = useMe(() => !!token.value);
 watch(
   () => me.data.value,
   (d) => {
-    if (d) operator.value = d.operator;
+    if (d) {
+      operator.value = d.operator;
+      role.value = d.role;
+    }
   },
 );
 watch(token, (t) => {
@@ -54,7 +57,7 @@ function logout() {
         </RouterLink>
       </nav>
       <v-spacer />
-      <span v-if="operator" class="meta mono op">{{ operator }}</span>
+      <span v-if="operator" class="meta mono op">{{ operator }}<template v-if="role"> · {{ role }}</template></span>
       <v-btn variant="text" icon size="small" aria-label="Alternar tema claro e escuro" @click="mode = mode === 'razaoLight' ? 'razaoDark' : 'razaoLight'">
         <v-icon :icon="mdiThemeLightDark" size="18" />
       </v-btn>
