@@ -175,8 +175,18 @@ type ArchivedMessage struct {
 	FirstFailedAt time.Time
 }
 
+// LedgerFilter filtra a consulta de lançamentos. Cursor é opaco para quem chama.
+type LedgerFilter struct {
+	MerchantID string
+	PaymentID  string
+	Cursor     string
+	Limit      int
+}
+
 // OperationsReader é o lado de leitura do painel.
 type OperationsReader interface {
+	// LedgerEntries lista lançamentos por id crescente, com paginação por cursor.
+	LedgerEntries(ctx context.Context, f LedgerFilter) (Page[LedgerView], error)
 	ListEvents(ctx context.Context, f EventFilter) (Page[EventSummary], error)
 	EventTrail(ctx context.Context, eventID string) (EventTrail, error)
 	MerchantBalances(ctx context.Context) ([]MerchantBalance, error)

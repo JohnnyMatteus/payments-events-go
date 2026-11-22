@@ -63,6 +63,8 @@ type ledgerDTO struct {
 	RecordedAt           time.Time `json:"recorded_at"`
 }
 
+func ledgerDTOOf(l app.LedgerView) ledgerDTO { return ledgerDTO(l) }
+
 type outboxDTO struct {
 	ID            int64      `json:"id"`
 	MessageID     string     `json:"message_id"`

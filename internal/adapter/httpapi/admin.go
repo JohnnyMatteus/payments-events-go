@@ -64,6 +64,7 @@ func (h *AdminHandler) Register(mux *http.ServeMux, auth Authenticator) {
 	read("GET /api/v1/me", h.me)
 	read("GET /api/v1/events", h.listEvents)
 	read("GET /api/v1/events/{id}", h.getEvent)
+	read("GET /api/v1/ledger-entries", h.listLedgerEntries)
 	read("GET /api/v1/balances/merchants", h.merchantBalances)
 	read("GET /api/v1/balances/payments", h.paymentBalances)
 	read("GET /api/v1/pipeline", h.pipeline)
@@ -113,6 +114,23 @@ func (h *AdminHandler) getEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, trailDTOOf(trail, h.Now()))
+}
+
+func (h *AdminHandler) listLedgerEntries(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit, err := intParam(q.Get("limit"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	page, err := h.Reader.LedgerEntries(r.Context(), app.LedgerFilter{
+		MerchantID: q.Get("merchant_id"), PaymentID: q.Get("payment_id"), Cursor: q.Get("cursor"), Limit: limit,
+	})
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, pageDTO(page, ledgerDTOOf))
 }
 
 func (h *AdminHandler) merchantBalances(w http.ResponseWriter, r *http.Request) {

@@ -290,6 +290,40 @@ func (r *OperationsReader) PaymentBalances(ctx context.Context, merchantID, curs
 	return page, nil
 }
 
+// LedgerEntries lista os lançamentos por id crescente. O cursor é o id do
+// último lançamento da página anterior (paginação por chave: não pula nem
+// repete linhas quando chegam lançamentos novos, que só entram no fim).
+func (r *OperationsReader) LedgerEntries(ctx context.Context, f app.LedgerFilter) (app.Page[app.LedgerView], error) {
+	var after int64
+	if f.Cursor != "" {
+		n, err := strconv.ParseInt(f.Cursor, 10, 64)
+		if err != nil || n < 0 {
+			return app.Page[app.LedgerView]{}, fmt.Errorf("%w: cursor", app.ErrInvalidInput)
+		}
+		after = n
+	}
+	size := pageSize(f.Limit)
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, transaction_id, payment_id, COALESCE(merchant_id, ''), direction, amount_cents, currency, kind,
+			COALESCE(adjusts_transaction_id, ''), occurred_at, recorded_at
+		FROM ledger_entries
+		WHERE ($1 = '' OR merchant_id = $1) AND ($2 = '' OR payment_id = $2) AND id > $3
+		ORDER BY id LIMIT $4`, f.MerchantID, f.PaymentID, after, size+1)
+	if err != nil {
+		return app.Page[app.LedgerView]{}, fmt.Errorf("query ledger entries: %w", err)
+	}
+	items, err := pgx.CollectRows(rows, pgx.RowToStructByPos[app.LedgerView])
+	if err != nil {
+		return app.Page[app.LedgerView]{}, fmt.Errorf("scan ledger entries: %w", err)
+	}
+	page := app.Page[app.LedgerView]{Items: items}
+	if len(items) > size {
+		page.Items = items[:size]
+		page.NextCursor = strconv.FormatInt(page.Items[size-1].ID, 10)
+	}
+	return page, nil
+}
+
 // PaymentBalance devolve a projeção de um pagamento, comparada ao ledger.
 func (r *OperationsReader) PaymentBalance(ctx context.Context, paymentID string) (app.PaymentBalance, error) {
 	rows, err := r.pool.Query(ctx, `
