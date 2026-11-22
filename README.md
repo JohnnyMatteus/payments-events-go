@@ -165,6 +165,7 @@ LocalStack, o relatório de conciliação (faltando, sobrando e valor divergente
 | Segredos do webhook e do banco por porta (Vault e Secrets Manager), com rotação sem downtime | [0014](docs/adr/0014-segredos-por-porta-e-rotacao-sem-downtime.md) |
 | Retenção: ledger imutável (gatilho) e exportado por mês, payloads arquivados em partições, outbox publicado limpo | [0015](docs/adr/0015-retencao-sem-perder-idempotencia-nem-razao.md) |
 | gRPC interno de saldo (só leitura) com token OIDC, papel checado no caso de uso e TLS obrigatório em produção | [0016](docs/adr/0016-grpc-interno-de-saldo-autenticado.md) |
+| LISTEN/NOTIFY acorda o relay; o polling continua como rede de segurança | [0021](docs/adr/0021-listen-notify-para-acordar-o-relay.md) |
 | Leitura do razão por cursor sem pular linha, com lock de ordem entre escritores e leitor | [0019](docs/adr/0019-leitura-do-razao-por-cursor-sem-pular-linhas.md) |
 | Deploy em Kubernetes com Helm e ArgoCD, sincronização manual e revisão fixada por tag | [0017](docs/adr/0017-deploy-em-kubernetes-com-helm-e-argocd.md) |
 | Cadeia de suprimentos no CI: SBOM (syft) e scan (Trivy) por digest; assinatura pendente | [0018](docs/adr/0018-supply-chain-no-ci-sbom-e-scan.md) |
@@ -176,7 +177,7 @@ Para defender o núcleo numa entrevista: [roteiro de idempotência](docs/roteiro
 ## Trade-offs
 
 - **At-least-once em vez de exactly-once.** Cada fronteira tem uma chave estável e uma constraint; o custo é guardar todos os `event_id` e `message_id` para sempre; a retenção arquiva o peso (payload, outbox publicado) e nunca a chave ([ADR 0015](docs/adr/0015-retencao-sem-perder-idempotencia-nem-razao.md)).
-- **Polling no outbox.** Simples e portável, com até 1 s de latência quando ocioso. CDC fica para quando o volume justificar.
+- **Polling no outbox, acordado por `LISTEN/NOTIFY`.** O polling é a garantia (até 1 s quando a notificação se perde); a notificação só reduz a latência típica ([ADR 0021](docs/adr/0021-listen-notify-para-acordar-o-relay.md)). CDC fica para quando o volume justificar.
 - **Sem ordem garantida no broker.** O consumidor de exemplo é comutativo; consumidores que dependem de ordem precisarão de versão por agregado.
 - **Backoff do consumidor segura um slot de prefetch.** Bom para o volume atual; atrasos longos pedem filas de retry com TTL.
 - **Conciliação em memória.** Cerca de 4 ms para 10 mil linhas; milhões de linhas pedem a comparação no banco.
@@ -201,7 +202,7 @@ Só o que falta de fato. O que foi escrito e ainda não rodou contra o serviço 
 
 **Previsto no design doc e não feito**
 
-- `LISTEN/NOTIFY` no relay para reduzir a latência do outbox, e CDC se o volume justificar.
+- CDC no outbox, se o volume justificar.
 - Conciliação em SQL para volumes grandes (hoje em memória).
 - Testes de mutação no domínio.
 - Alerta para o job de conciliação com divergência (código 3); no Kubernetes, use a falha do CronJob.

@@ -39,13 +39,11 @@ spec:
             # Para onde o nginx do painel encaminha /api (resolvido na subida).
             - name: API_UPSTREAM
               value: {{ .Values.web.apiUpstream | default (printf "%s-api:80" (include "payments.fullname" .)) | quote }}
-            {{- $authority := .Values.web.oidcAuthority | default .Values.oidc.issuerUrl }}
-            {{- if and $authority .Values.web.oidcClientId }}
+            # Dentro do cluster o painel nunca cai no formulário de token de dev: sem emissor e client a renderização falha.
             - name: OIDC_AUTHORITY
-              value: {{ $authority | quote }}
+              value: {{ required "web.enabled exige web.oidcAuthority ou oidc.issuerUrl (o painel não usa o token de dev no cluster)" (.Values.web.oidcAuthority | default .Values.oidc.issuerUrl) | quote }}
             - name: OIDC_CLIENT_ID
-              value: {{ .Values.web.oidcClientId | quote }}
-            {{- end }}
+              value: {{ required "web.enabled exige web.oidcClientId (client público com PKCE)" .Values.web.oidcClientId | quote }}
           startupProbe:
             httpGet: {path: /healthz, port: http}
             periodSeconds: 2

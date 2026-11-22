@@ -167,5 +167,10 @@ func insertOutbox(ctx context.Context, tx pgx.Tx, msg *app.OutboxMessage) error 
 		msg.MessageID, msg.RoutingKey, msg.Payload, headersJSON); err != nil {
 		return fmt.Errorf("insert outbox message: %w", err)
 	}
+	// Acorda o relay no commit (LISTEN/NOTIFY). Se o NOTIFY falhar a transação desfaz: o
+	// custo é o mesmo de qualquer outra instrução e o erro não deve ser engolido.
+	if _, err := tx.Exec(ctx, "SELECT pg_notify($1, $2)", OutboxChannel, msg.MessageID); err != nil {
+		return fmt.Errorf("notify outbox: %w", err)
+	}
 	return nil
 }

@@ -12,7 +12,7 @@ Renderiza:
 | CronJob de conciliação | `payments reconcile -daily -fail-on-divergence` (dia anterior, UTC) |
 | CronJob de retenção | `payments retention` (ADR 0015) |
 | Painel Razão (opcional, `web.enabled`) | Deployment e Service do nginx do `web/`; o host da API é `web.apiUpstream` (padrão `<release>-api:80`), e o login OIDC vem de `web.oidcClientId` e do emissor |
-| NetworkPolicy (opcional) | entrada na API só de `networkPolicy.ingressFrom` |
+| NetworkPolicy (opcional) | entrada na API só de `networkPolicy.ingressFrom`; com `web.enabled`, o pod do painel do mesmo release é incluído sozinho (sem `ingressFrom`, todos os namespaces entram) |
 
 ## Segredos
 

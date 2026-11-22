@@ -64,6 +64,61 @@ func (r *OutboxRepository) ProcessDue(ctx context.Context, now time.Time, limit 
 	return processed, nil
 }
 
+// OutboxChannel é o canal LISTEN/NOTIFY em que a gravação no outbox avisa o relay.
+const OutboxChannel = "payments_outbox"
+
+// OutboxNotifier acorda o relay quando uma mensagem entra no outbox, para a
+// latência não depender só do polling. O NOTIFY é enviado na própria transação
+// que grava a mensagem e só é entregue no commit; uma transação desfeita não
+// avisa ninguém.
+type OutboxNotifier struct {
+	pool *pgxpool.Pool
+}
+
+// NewOutboxNotifier cria o notificador.
+func NewOutboxNotifier(pool *pgxpool.Pool) *OutboxNotifier { return &OutboxNotifier{pool: pool} }
+
+// Wake devolve um canal que recebe um sinal a cada notificação (sinais em
+// rajada se juntam em um). Mantém uma conexão dedicada em LISTEN e a refaz se
+// cair, até o contexto acabar. Notificações perdidas na reconexão não causam
+// perda de mensagem: o relay ainda faz polling.
+func (n *OutboxNotifier) Wake(ctx context.Context) <-chan struct{} {
+	wake := make(chan struct{}, 1)
+	go func() {
+		defer close(wake)
+		for ctx.Err() == nil {
+			n.listen(ctx, wake)
+			select {
+			case <-ctx.Done():
+			case <-time.After(time.Second):
+			}
+		}
+	}()
+	return wake
+}
+
+func (n *OutboxNotifier) listen(ctx context.Context, wake chan<- struct{}) {
+	pooled, err := n.pool.Acquire(ctx)
+	if err != nil {
+		return
+	}
+	// A conexão sai do pool: ela fica presa ao LISTEN e o pool cria outra sob demanda.
+	conn := pooled.Hijack()
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+	if _, err := conn.Exec(ctx, "LISTEN "+OutboxChannel); err != nil {
+		return
+	}
+	for {
+		if _, err := conn.WaitForNotification(ctx); err != nil {
+			return
+		}
+		select {
+		case wake <- struct{}{}:
+		default: // já há um sinal pendente
+		}
+	}
+}
+
 func lockDue(ctx context.Context, tx pgx.Tx, now time.Time, limit int) ([]app.OutboxMessage, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id, message_id, routing_key, payload, headers, attempts, created_at
