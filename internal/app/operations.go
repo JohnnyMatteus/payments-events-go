@@ -42,7 +42,7 @@ func NewStatementService(store StatementStore, parse StatementParser) *Statement
 func (s *StatementService) Upload(ctx context.Context, date time.Time, body []byte) (StatementObject, int, error) {
 	lines, err := s.parse(bytes.NewReader(body))
 	if err != nil {
-		return StatementObject{}, 0, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+		return StatementObject{}, 0, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
 	obj, err := s.store.Put(ctx, date, body)
 	return obj, len(lines), err

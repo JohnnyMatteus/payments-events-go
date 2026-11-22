@@ -160,7 +160,9 @@ func TestCaseServiceExplainNeedsOpenCaseAndReason(t *testing.T) {
 }
 
 func TestItemsOfKeepsStatementOrderAndPutsLedgerOnlyLast(t *testing.T) {
-	line := func(n int, tx string) *domain.StatementLine { return &domain.StatementLine{LineNumber: n, TransactionID: tx} }
+	line := func(n int, tx string) *domain.StatementLine {
+		return &domain.StatementLine{LineNumber: n, TransactionID: tx}
+	}
 	report := domain.Report{
 		Matches: []domain.Match{{Statement: *line(3, "c")}, {Statement: *line(1, "a")}},
 		Divergences: []domain.Divergence{
