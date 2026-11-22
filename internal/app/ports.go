@@ -141,3 +141,10 @@ type RateDecision struct {
 type RateLimiter interface {
 	Allow(ctx context.Context, key string) (RateDecision, error)
 }
+
+// SecretStore lê um segredo por referência (o formato da referência é do
+// adaptador: Vault "caminho#campo", Secrets Manager "id#campo"). Quem chama
+// nunca grava o valor em log.
+type SecretStore interface {
+	Get(ctx context.Context, ref string) (string, error)
+}

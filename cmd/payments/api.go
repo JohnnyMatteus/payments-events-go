@@ -12,7 +12,7 @@ import (
 )
 
 func runAPI(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
-	if err := cfg.Require("DATABASE_URL", "WEBHOOK_SECRETS"); err != nil {
+	if err := cfg.Require("DATABASE_URL"); err != nil {
 		return err
 	}
 	tel, shutdown, err := setupTelemetry(ctx, cfg, "payments-api", logger)
@@ -21,13 +21,13 @@ func runAPI(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}
 	defer shutdown()
 
-	pool, err := postgres.Connect(ctx, cfg.DatabaseURL)
+	pool, err := openPool(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
 
-	verifier, err := httpapi.NewVerifier(cfg.WebhookSecrets, cfg.SignatureTolerance)
+	verifier, err := newVerifier(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}

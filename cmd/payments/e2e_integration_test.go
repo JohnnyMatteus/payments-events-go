@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	amqp "github.com/rabbitmq/amqp091-go"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -75,7 +77,7 @@ func TestEndToEnd(t *testing.T) {
 		"WEBHOOK_SECRETS":      e2eSecret,
 		"HTTP_ADDR":            apiAddr,
 		"OUTBOX_POLL_INTERVAL": "50ms",
-		"LOG_LEVEL":            "warn",
+		"LOG_LEVEL":            "info",
 		"S3_ENDPOINT":          s3Endpoint,
 		"S3_USE_PATH_STYLE":    "true",
 	}
@@ -91,11 +93,22 @@ func TestEndToEnd(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	codes := map[string]*int{}
+	logs := map[string]*syncBuffer{}
 	start := func(name string, extra map[string]string) {
 		code := new(int)
 		codes[name] = code
-		wg.Go(func() { *code = run(ctx, []string{name}, getenv(extra), io.Discard, io.Discard) })
+		out := &syncBuffer{}
+		logs[name] = out
+		wg.Go(func() { *code = run(ctx, []string{name}, getenv(extra), out, out) })
 	}
+	// Registrado antes da parada dos processos: o Cleanup roda em ordem inversa,
+	// então o diagnóstico sai depois de api, relay e consumidor terminarem e com
+	// a saída deles completa.
+	t.Cleanup(func() {
+		if t.Failed() {
+			dumpDiagnostics(t, logs)
+		}
+	})
 	t.Cleanup(func() {
 		cancel()
 		wg.Wait()
@@ -243,4 +256,109 @@ func uploadStatement(t *testing.T, key, body string) string {
 		t.Fatal(err)
 	}
 	return "s3://" + bucket + "/" + key
+}
+
+// syncBuffer recebe a saída de vários processos (goroutines) sem corrida.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// scrub tira do texto os valores sensíveis do ambiente de teste antes de logar.
+func scrub(text string) string {
+	for _, secret := range []string{pg.DSN, amqpURL, e2eSecret, s3Endpoint} {
+		if secret != "" {
+			text = strings.ReplaceAll(text, secret, "[redigido]")
+		}
+	}
+	return text
+}
+
+// dumpDiagnostics mostra, só quando o teste falha, o que cada processo escreveu
+// e o estado do pipeline (outbox, projeção, dead letters e filas), para a falha
+// dizer a causa em vez de só "timed out". Não imprime env, DSN nem segredos.
+func dumpDiagnostics(t *testing.T, logs map[string]*syncBuffer) {
+	t.Helper()
+	for _, name := range []string{"api", "relay", "consumer"} {
+		if b, ok := logs[name]; ok {
+			t.Logf("saída de %s:\n%s", name, scrub(b.String()))
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	rows, err := pg.Pool.Query(ctx, `
+		SELECT id, message_id, routing_key, status, attempts, COALESCE(last_error, ''), next_attempt_at, published_at IS NOT NULL
+		FROM outbox_messages ORDER BY id`)
+	if err != nil {
+		t.Logf("diagnóstico: consulta ao outbox falhou: %v", err)
+	} else {
+		defer rows.Close()
+		for rows.Next() {
+			var (
+				id, attempts           int64
+				msgID, key, st, lastEr string
+				next                   time.Time
+				published              bool
+			)
+			if err := rows.Scan(&id, &msgID, &key, &st, &attempts, &lastEr, &next, &published); err != nil {
+				t.Logf("diagnóstico: leitura do outbox falhou: %v", err)
+				break
+			}
+			t.Logf("outbox id=%d message_id=%s routing_key=%s status=%s attempts=%d next_attempt_at=%s published=%t last_error=%q",
+				id, msgID, key, st, attempts, next.UTC().Format(time.RFC3339Nano), published, scrub(lastEr))
+		}
+	}
+
+	var events, ledger, consumed, balances, deadLetters int
+	err = pg.Pool.QueryRow(ctx, `SELECT
+		(SELECT count(*) FROM processed_events), (SELECT count(*) FROM ledger_entries),
+		(SELECT count(*) FROM consumed_messages), (SELECT count(*) FROM payment_balances),
+		(SELECT count(*) FROM dead_letters)`).Scan(&events, &ledger, &consumed, &balances, &deadLetters)
+	if err != nil {
+		t.Logf("diagnóstico: contagens falharam: %v", err)
+	} else {
+		t.Logf("contagens: processed_events=%d ledger_entries=%d consumed_messages=%d payment_balances=%d dead_letters=%d",
+			events, ledger, consumed, balances, deadLetters)
+	}
+	var captured, refunded int64
+	if err := pg.Pool.QueryRow(ctx,
+		"SELECT captured_cents, refunded_cents FROM payment_balances WHERE payment_id = 'pay_e2e'").Scan(&captured, &refunded); err != nil {
+		t.Logf("saldo de pay_e2e: %v", err)
+	} else {
+		t.Logf("saldo de pay_e2e: captured_cents=%d refunded_cents=%d (esperado 15000 e 2500)", captured, refunded)
+	}
+
+	conn, err := amqp.Dial(amqpURL)
+	if err != nil {
+		t.Logf("diagnóstico: conexão com o broker falhou: %s", scrub(err.Error()))
+		return
+	}
+	defer func() { _ = conn.Close() }()
+	for _, queue := range []string{"balance-projector", "balance-projector.dlq"} {
+		ch, err := conn.Channel()
+		if err != nil {
+			t.Logf("diagnóstico: canal para %s falhou: %v", queue, err)
+			return
+		}
+		q, err := ch.QueueDeclarePassive(queue, true, false, false, false, nil)
+		if err != nil {
+			t.Logf("fila %s: %v", queue, err)
+			continue
+		}
+		t.Logf("fila %s: messages=%d consumers=%d", queue, q.Messages, q.Consumers)
+		_ = ch.Close()
+	}
 }

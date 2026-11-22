@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -28,7 +29,7 @@ var (
 // timestamps fora da janela de tolerância, o que limita ataques de replay.
 // Aceita vários segredos para permitir rotação sem janela de indisponibilidade.
 type Verifier struct {
-	secrets   [][]byte
+	secrets   atomic.Pointer[[][]byte]
 	tolerance time.Duration
 	now       func() time.Time
 }
@@ -36,18 +37,42 @@ type Verifier struct {
 // NewVerifier cria o verificador. É preciso ao menos um segredo não vazio.
 func NewVerifier(secrets []string, tolerance time.Duration) (*Verifier, error) {
 	v := &Verifier{tolerance: tolerance, now: time.Now}
-	for _, s := range secrets {
-		if s = strings.TrimSpace(s); s != "" {
-			v.secrets = append(v.secrets, []byte(s))
-		}
-	}
-	if len(v.secrets) == 0 {
-		return nil, errors.New("at least one webhook secret is required")
+	if err := v.SetSecrets(secrets); err != nil {
+		return nil, err
 	}
 	if tolerance <= 0 {
 		return nil, errors.New("signature tolerance must be positive")
 	}
 	return v, nil
+}
+
+// SetSecrets troca o conjunto de segredos aceitos, sem parar o serviço. Na
+// rotação o conjunto tem o novo e o antigo: ambos validam até o provedor
+// terminar de migrar; depois o antigo sai. Um conjunto vazio é recusado e o
+// anterior continua valendo (falha fechado, sem aceitar tudo nem nada).
+func (v *Verifier) SetSecrets(secrets []string) error {
+	var next [][]byte
+	for _, s := range secrets {
+		if s = strings.TrimSpace(s); s != "" {
+			next = append(next, []byte(s))
+		}
+	}
+	if len(next) == 0 {
+		return errors.New("at least one webhook secret is required")
+	}
+	v.secrets.Store(&next)
+	return nil
+}
+
+// ParseSecretList lê a lista "atual,anterior,..." que o cofre guarda.
+func ParseSecretList(raw string) []string {
+	var out []string
+	for item := range strings.SplitSeq(raw, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 // Verify valida o header de assinatura contra o corpo bruto da requisição.
@@ -63,7 +88,7 @@ func (v *Verifier) Verify(header string, body []byte) error {
 	if age > v.tolerance || age < -v.tolerance {
 		return fmt.Errorf("%w: age %s", ErrStaleTimestamp, age.Round(time.Second))
 	}
-	for _, secret := range v.secrets {
+	for _, secret := range *v.secrets.Load() {
 		expected := computeMAC(secret, ts, body)
 		for _, sig := range signatures {
 			if hmac.Equal(expected, sig) {

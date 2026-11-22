@@ -23,7 +23,7 @@ func runConsumer(ctx context.Context, cfg config.Config, logger *slog.Logger) er
 	}
 	defer shutdown()
 
-	pool, err := postgres.Connect(ctx, cfg.DatabaseURL)
+	pool, err := openPool(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}

@@ -40,6 +40,10 @@ up-portfolio: network ## Sobe o núcleo ligado à rede portfolio-net
 up-oidc: network ## Sobe o núcleo com login OIDC (exige OIDC_ISSUER_URL, OIDC_AUTHORITY e OIDC_CLIENT_ID)
 	$(CORE) -f docker-compose.yml -f docker-compose.oidc.yml up -d --build --wait
 
+.PHONY: up-secrets
+up-secrets: ## Sobe o núcleo lendo segredos do Secrets Manager (LocalStack)
+	$(CORE) -f docker-compose.yml -f docker-compose.secrets.yml up -d --build --wait
+
 .PHONY: down
 down: ## Para os contêineres (mantém os volumes)
 	$(ALL) down

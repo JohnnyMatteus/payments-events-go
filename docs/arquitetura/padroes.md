@@ -52,6 +52,15 @@ Não usamos Specification nem Chain of Responsibility: as validações do evento
   o caso de uso, falhando fechado. Trocar o mecanismo de login não muda nenhuma regra, e um ponto de entrada novo
   não consegue esquecer a checagem. Custo: o contexto carrega o ator (valor implícito), e o teste precisa montá-lo.
 
+## Segredos por porta e rotação
+
+- **Port/Adapter + Last-Known-Good** ([`app.SecretStore`](../../internal/app/ports.go),
+  [`SecretRotation`](../../internal/app/secrets.go), [`secretstore`](../../internal/adapter/secretstore/vault.go)): o
+  caso de uso não sabe se o segredo vem do Vault ou da AWS; a rotação só troca o valor quando a leitura é válida e
+  guarda o último bom. O verificador aceita um conjunto de chaves trocado de forma atômica
+  ([`Verifier.SetSecrets`](../../internal/adapter/httpapi/signature.go)). Custo: um polling por segredo e a regra de
+  que o cofre nunca pode ser a única verdade em runtime (a queda dele não derruba, mas congela a rotação).
+
 ## SOLID
 
 | Princípio | Onde | O que ganha | Custo |
