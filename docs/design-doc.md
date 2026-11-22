@@ -1,8 +1,8 @@
 # Design doc: processador de eventos de pagamento
 
 - Autor: Johnny Santos
-- Status: fundação implementada
-- Última revisão: 2026-11-21
+- Status: implementado; o estado de cada item do plano está na seção 10
+- Última revisão: 2026-11-22
 
 ## 1. Contexto
 
@@ -26,10 +26,8 @@ Os riscos são clássicos de integração financeira: webhooks repetidos ou conc
 **Não-objetivos (nesta fase)**
 
 - Multi-moeda com câmbio, taxas e repasses (split).
-- Correção automática de divergências.
-- Deploy em Kubernetes e Helm (ver plano de evolução).
-- Interface gráfica.
-- Gestão de segredos em cofre (os segredos vêm de variáveis de ambiente).
+- Correção automática de divergências, sem uma pessoa decidir (o painel propõe e outra pessoa aprova, ADR 0011).
+- Partição do próprio `ledger_entries` (ADR 0015 explica por que não e o que fazer se o volume pedir).
 
 ## 3. Arquitetura
 
@@ -229,7 +227,7 @@ Detalhado em [roteiros/conciliacao.md](roteiros/conciliacao.md): o job lê o CSV
 | Banco indisponível no webhook | evento não registrado | 500; o provedor reenvia |
 | Processo cai entre commit e resposta | provedor reenvia | reentrega vira `duplicate` |
 | Broker indisponível | evento de integração atrasa | mensagem fica no outbox; retry exponencial com jitter; `outbox_retries_total` |
-| Broker fora por muito tempo | mensagem não sai | após `OUTBOX_MAX_ATTEMPTS`, `status = dead` e `outbox_dead_total`; reprocessar com `UPDATE ... SET status='pending'` |
+| Broker fora por muito tempo | mensagem não sai | após `OUTBOX_MAX_ATTEMPTS`, `status = dead` e `outbox_dead_total`; reprocessar ou descartar pelo painel (DLQ, ADR 0011) |
 | Relay cai após confirm e antes do commit | publicação duplicada | consumidor deduplica por `message_id` |
 | Mensagem venenosa | laço de reentrega | erro permanente vai direto para a DLQ |
 | Falha transitória no consumidor | atraso | backoff e requeue até `x-delivery-limit`, depois DLQ |
@@ -242,9 +240,11 @@ Detalhado em [roteiros/conciliacao.md](roteiros/conciliacao.md): o job lê o CSV
 - **Entrada**: corpo limitado a 1 MiB, JSON tolerante a campos novos, validação de domínio antes de gravar; erros em RFC 9457 sem vazar detalhes internos.
 - **Servidor HTTP**: `ReadHeaderTimeout`, `ReadTimeout`, `WriteTimeout` e `IdleTimeout` explícitos (mitiga slowloris).
 - **SQL**: somente consultas parametrizadas (pgx); nenhuma concatenação de entrada.
-- **Segredos**: só por variáveis de ambiente; `.env` fora do Git; valores de desenvolvimento marcados como `dev-only`.
+- **Segredos**: variáveis de ambiente por padrão, ou Vault e Secrets Manager por porta, com rotação sem reinício (ADR [0014](adr/0014-segredos-por-porta-e-rotacao-sem-downtime.md)); `.env` fora do Git; valores de desenvolvimento marcados como `dev-only`.
+- **Operadores e serviços**: OIDC com PKCE no painel e token OIDC na API e no gRPC; papéis checados no caso de uso e quatro olhos por identidade estável (ADR [0013](adr/0013-oidc-pkce-e-papeis-no-caso-de-uso.md), [0016](adr/0016-grpc-interno-de-saldo-autenticado.md)); o token estático de dev é recusado em `APP_ENV=production`.
+- **Razão imutável**: o banco recusa `UPDATE`, `DELETE` e `TRUNCATE` em `ledger_entries` (ADR [0015](adr/0015-retencao-sem-perder-idempotencia-nem-razao.md)).
 - **Contêiner**: imagem distroless, usuário não-root, binário estático, base fixada por digest.
-- **Cadeia de suprimentos**: `govulncheck` e `golangci-lint` (com `gosec`) no CI; actions fixadas por versão major.
+- **Cadeia de suprimentos**: `govulncheck` e `golangci-lint` (com `gosec`) no CI; actions fixadas por versão major; SBOM (syft) e scan (Trivy) da imagem, ambos por digest (ADR [0018](adr/0018-supply-chain-no-ci-sbom-e-scan.md)). Assinatura da imagem ainda não.
 - **Dados**: o payload bruto do webhook é guardado para auditoria e não contém dados de cartão (o provedor fictício não envia PAN).
 
 ## 8. Observabilidade
@@ -272,13 +272,18 @@ Detalhes em [observabilidade.md](observabilidade.md) e ADR [0008](adr/0008-obser
 
 ## 10. Plano de evolução
 
-0. **Validação pendente da fundação**: `docker build` da imagem final, subida completa do compose (`make up && make seed && make reconcile`) e a suíte de integração com LocalStack e o e2e na versão final ficam para o CI; localmente foram validados os testes unitários, o lint, `docker compose config`, o `helm lint` e, em versão anterior, os testes de integração de PostgreSQL e RabbitMQ.
-1. **Kubernetes e Helm**: chart com Deployments para `api`, `relay` e `consumer`, CronJob para `reconcile`, probes em `/healthz` e `/readyz`, HPA na API e PodDisruptionBudget; GitOps com ArgoCD.
-2. **Segredos**: Secrets Manager (LocalStack localmente) ou Vault para `WEBHOOK_SECRETS` e credenciais.
-3. **Chegada do extrato**: notificação S3 → SQS para disparar a conciliação assim que o arquivo chega.
-4. **Outbox**: `LISTEN/NOTIFY` para reduzir latência; CDC se o volume justificar; limpeza de mensagens publicadas.
-5. **Retenção**: particionamento mensal de `processed_events` e `ledger_entries`.
-6. **Conciliação**: casos de divergência com estado, lançamentos de ajuste com aprovação e comparação em SQL para volumes grandes.
-7. **APIs**: consulta de saldo e de lançamentos (REST com paginação por cursor) e uma API gRPC interna para outros serviços.
-8. **Segurança de supply chain**: SBOM, assinatura da imagem (cosign) e scan com Trivy no CI.
-9. **Testes**: carga com k6 no webhook e testes de mutação no domínio.
+Estado em 2026-11-22. "Feito" quer dizer implementado e testado no que o código controla; o que depende de serviço real, cluster
+ou decisão do autor está dito na linha.
+
+| # | Item | Estado |
+| --- | --- | --- |
+| 0 | Validação da fundação | Feito: o CI roda lint, unitários, painel, integração (testcontainers), build, `docker build`, `govulncheck` e `docker compose config`. |
+| 1 | Kubernetes e Helm | Feito no chart ([ADR 0017](adr/0017-deploy-em-kubernetes-com-helm-e-argocd.md)): Deployments, CronJobs de conciliação e retenção, probes, HPA, PodDisruptionBudget, hook de migração e ArgoCD com sincronização manual. O CI só renderiza; nada foi aplicado em cluster. |
+| 2 | Segredos | Feito com dublês ([ADR 0014](adr/0014-segredos-por-porta-e-rotacao-sem-downtime.md)): Vault e Secrets Manager (LocalStack). Falta provar contra os serviços reais. |
+| 3 | Chegada do extrato | Feito ([ADR 0012](adr/0012-disparo-automatico-da-conciliacao.md)). |
+| 4 | Outbox | Limpeza de mensagens publicadas feita ([ADR 0015](adr/0015-retencao-sem-perder-idempotencia-nem-razao.md)). `LISTEN/NOTIFY` e CDC não foram feitos. |
+| 5 | Retenção | Parcial ([ADR 0015](adr/0015-retencao-sem-perder-idempotencia-nem-razao.md)): payloads de `processed_events` arquivados em tabela particionada por mês, ledger exportado por mês e protegido por gatilhos. O `ledger_entries` em si não é particionado, de propósito. Prazos de guarda não foram definidos pelo autor. |
+| 6 | Conciliação | Casos com estado e ajustes com aprovação feitos ([ADR 0011](adr/0011-autenticacao-de-operador-e-quatro-olhos.md)). Comparação em SQL para volumes grandes não foi feita. |
+| 7 | APIs | Saldo e lançamentos por REST com cursor (`/api/v1/balances/*`, `/api/v1/ledger-entries`) e gRPC interno de saldo autenticado ([ADR 0016](adr/0016-grpc-interno-de-saldo-autenticado.md)). |
+| 8 | Supply chain | SBOM e Trivy feitos ([ADR 0018](adr/0018-supply-chain-no-ci-sbom-e-scan.md)). Assinatura (cosign) pendente de decisão do autor. |
+| 9 | Testes | Script k6 com limiares em `loadtest/`, nunca executado e fora do CI. Testes de mutação não foram feitos. |

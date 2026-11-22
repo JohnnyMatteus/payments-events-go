@@ -16,7 +16,7 @@ Este serviço resolve os três: idempotência garantida pelo banco, outbox trans
 
 ## Arquitetura
 
-Hexagonal, num binário com subcomandos (`api`, `relay`, `consumer`, `reconcile`, `migrate`).
+Hexagonal, num binário com subcomandos (`api`, `relay`, `consumer`, `watch`, `reconcile`, `retention`, `migrate`, `healthcheck`).
 
 ```mermaid
 flowchart LR
@@ -40,9 +40,14 @@ flowchart LR
 cmd/payments/              composição e subcomandos
 internal/domain/           regras puras: evento, lançamento, conciliação, dinheiro
 internal/app/              casos de uso e portas (interfaces)
-internal/adapter/          httpapi, postgres (+ migrations), rabbitmq, redisstore, objectstore (S3), csvstatement, reportout
+internal/adapter/          httpapi, grpcapi, oidcauth, secretstore (Vault e Secrets Manager), postgres (+ migrations),
+                           rabbitmq, redisstore, objectstore (S3), sqsqueue, csvstatement, reportout
 internal/platform/         config por ambiente, observabilidade (slog, OpenTelemetry)
 internal/testinfra/        contêineres para testes de integração (build tag integration)
+api/proto/                 contrato gRPC de saldo (código gerado em internal/adapter/grpcapi, `make proto`)
+web/                       painel Razão (Vue 3)
+deploy/                    chart Helm, manifesto ArgoCD, scheduler e Prometheus (config e alertas)
+loadtest/                  carga do webhook com k6
 docs/                      design doc, ADRs, roteiros e observabilidade
 ```
 
@@ -77,6 +82,8 @@ Enviar um webhook à mão:
 
 Conciliação automática ([ADR 0012](docs/adr/0012-disparo-automatico-da-conciliacao.md)): o extrato depositado em `settlements/` no bucket gera uma notificação S3 → SQS que o serviço `watcher` (`payments watch`) consome, conciliando o dia uma única vez por versão do objeto. O serviço `scheduler` (crond) roda `payments reconcile --daily` todo dia às 03:00 UTC (`RECONCILE_CRON`) como rede de segurança.
 
+Variantes opcionais do ambiente local: `make up-oidc` (login OIDC em vez do token de dev, [ADR 0013](docs/adr/0013-oidc-pkce-e-papeis-no-caso-de-uso.md)), `make up-secrets` (segredos no Secrets Manager do LocalStack, [ADR 0014](docs/adr/0014-segredos-por-porta-e-rotacao-sem-downtime.md)), `make up-grpc` (gRPC de saldo em `127.0.0.1:9191`, [ADR 0016](docs/adr/0016-grpc-interno-de-saldo-autenticado.md)), `make retention` (política de retenção, [ADR 0015](docs/adr/0015-retencao-sem-perder-idempotencia-nem-razao.md)) e `make loadtest` (k6, ver [loadtest/](loadtest/README.md)).
+
 Outros alvos: `make up-observability` (Jaeger em http://localhost:16687 e Prometheus em http://localhost:9095), `make ps`, `make logs`, `make down`, `make clean`, `make help`. Para ligar a API à rede compartilhada do ecossistema: `make up-portfolio`.
 
 | Serviço | Endereço local |
@@ -92,7 +99,7 @@ As portas evitam colisão com os outros projetos do portfólio e podem ser troca
 
 ## Interface (Razão)
 
-Painel em `web/` (Vue 3, Vuetify 3, TanStack Query, TypeScript estrito) com a identidade **Razão**: o livro-razão aberto, extrato do provedor de um lado e ledger do outro. Sobe com o núcleo (`make up`) em http://localhost:8086; entre com `dev-token-ana` ou `dev-token-bruno` (papel `operador`, dois para exercitar a aprovação com quatro olhos) ou `dev-token-carla` (papel `leitor`, só consulta; [ADR 0011](docs/adr/0011-autenticacao-de-operador-e-quatro-olhos.md)).
+Painel em `web/` (Vue 3, Vuetify 3, TanStack Query, TypeScript estrito) com a identidade **Razão**: o livro-razão aberto, extrato do provedor de um lado e ledger do outro. Sobe com o núcleo (`make up`) em http://localhost:8086; em desenvolvimento entre com `dev-token-ana` ou `dev-token-bruno` (papel `operador`, dois para exercitar a aprovação com quatro olhos) ou `dev-token-carla` (papel `leitor`, só consulta; [ADR 0011](docs/adr/0011-autenticacao-de-operador-e-quatro-olhos.md)). Com `OIDC_ISSUER_URL` o painel entra por OIDC com PKCE e o token de dev deixa de valer; `APP_ENV=production` recusa o token de dev ([ADR 0013](docs/adr/0013-oidc-pkce-e-papeis-no-caso-de-uso.md)).
 
 | Tela | O que faz |
 | --- | --- |
@@ -105,7 +112,7 @@ Uma faixa fixa mostra a saúde do pipeline (outbox pendente e mais antigo, publi
 
 ### API de operação
 
-`/api/v1` (token `Authorization: Bearer`; ações de escrita exigem o papel `operador`, o `leitor` recebe 403): `GET /events`, `/events/{id}`, `/balances/merchants`, `/balances/payments`, `/pipeline`, `/dead-letters`, `POST /dead-letters/{broker|outbox}/{id}/reprocess|discard`, `GET|PUT /statements`, `GET|POST /reconciliation/runs`, `GET /reconciliation/runs/{id}/items`, `GET /cases`, `POST /cases/{id}/explain|adjustments`, `GET /adjustments`, `POST /adjustments/{id}/approve|reject`. Erros em `application/problem+json`. Sem `OPERATOR_TOKENS`, a API de operação fica desligada.
+`/api/v1` (`Authorization: Bearer` com token OIDC, ou o token de dev; ações de escrita exigem o papel `operador`, checado no caso de uso, e o `leitor` recebe 403): `GET /events`, `/events/{id}`, `/ledger-entries` (cursor), `/balances/merchants`, `/balances/payments`, `/pipeline`, `/dead-letters`, `POST /dead-letters/{broker|outbox}/{id}/reprocess|discard`, `GET|PUT /statements`, `GET|POST /reconciliation/runs`, `GET /reconciliation/runs/{id}/items`, `GET /cases`, `POST /cases/{id}/explain|adjustments`, `GET /adjustments`, `POST /adjustments/{id}/approve|reject`. Erros em `application/problem+json`. Sem `OIDC_ISSUER_URL` nem `OPERATOR_TOKENS`, a API de operação fica desligada. O saldo também sai por gRPC ([ADR 0016](docs/adr/0016-grpc-interno-de-saldo-autenticado.md)), opt-in por `GRPC_ADDR`.
 
 ## Como testar
 
@@ -156,8 +163,10 @@ LocalStack, o relatório de conciliação (faltando, sobrando e valor divergente
 | Conciliação disparada por notificação S3 → SQS (idempotente por versão do objeto) e agenda diária por cron | [0012](docs/adr/0012-disparo-automatico-da-conciliacao.md) |
 | OIDC com PKCE (Keycloak do platform-edge) para operadores; papéis checados no caso de uso; token só em dev | [0013](docs/adr/0013-oidc-pkce-e-papeis-no-caso-de-uso.md) |
 | Segredos do webhook e do banco por porta (Vault e Secrets Manager), com rotação sem downtime | [0014](docs/adr/0014-segredos-por-porta-e-rotacao-sem-downtime.md) |
-| gRPC interno de saldo (só leitura) com token OIDC, papel checado no caso de uso e TLS obrigatório em produção | [0016](docs/adr/0016-grpc-interno-de-saldo-autenticado.md) |
 | Retenção: ledger imutável (gatilho) e exportado por mês, payloads arquivados em partições, outbox publicado limpo | [0015](docs/adr/0015-retencao-sem-perder-idempotencia-nem-razao.md) |
+| gRPC interno de saldo (só leitura) com token OIDC, papel checado no caso de uso e TLS obrigatório em produção | [0016](docs/adr/0016-grpc-interno-de-saldo-autenticado.md) |
+| Deploy em Kubernetes com Helm e ArgoCD, sincronização manual e revisão fixada por tag | [0017](docs/adr/0017-deploy-em-kubernetes-com-helm-e-argocd.md) |
+| Cadeia de suprimentos no CI: SBOM (syft) e scan (Trivy) por digest; assinatura pendente | [0018](docs/adr/0018-supply-chain-no-ci-sbom-e-scan.md) |
 
 Padrões de projeto e SOLID com os trechos reais do código: [docs/arquitetura/padroes.md](docs/arquitetura/padroes.md).
 
@@ -165,7 +174,7 @@ Para defender o núcleo numa entrevista: [roteiro de idempotência](docs/roteiro
 
 ## Trade-offs
 
-- **At-least-once em vez de exactly-once.** Cada fronteira tem uma chave estável e uma constraint; o custo é guardar todos os `event_id` e `message_id` (precisa de retenção).
+- **At-least-once em vez de exactly-once.** Cada fronteira tem uma chave estável e uma constraint; o custo é guardar todos os `event_id` e `message_id` para sempre; a retenção arquiva o peso (payload, outbox publicado) e nunca a chave ([ADR 0015](docs/adr/0015-retencao-sem-perder-idempotencia-nem-razao.md)).
 - **Polling no outbox.** Simples e portável, com até 1 s de latência quando ocioso. CDC fica para quando o volume justificar.
 - **Sem ordem garantida no broker.** O consumidor de exemplo é comutativo; consumidores que dependem de ordem precisarão de versão por agregado.
 - **Backoff do consumidor segura um slot de prefetch.** Bom para o volume atual; atrasos longos pedem filas de retry com TTL.
@@ -174,13 +183,28 @@ Para defender o núcleo numa entrevista: [roteiro de idempotência](docs/roteiro
 
 ## Próximos passos
 
-- Validar no CI o que não foi exercitado localmente nesta rodada (Docker local com erro de I/O): os testes de integração da API de operação (`operations_integration_test.go`), o build da imagem do painel e `docker build` da imagem final, subida completa do `docker-compose` com `make up && make seed && make reconcile` e a suíte `make test-integration` com o LocalStack e o teste ponta a ponta na versão final.
-- Helm chart e manifests Kubernetes (Deployments, CronJob de conciliação, HPA, probes) e GitOps com ArgoCD.
-- Exercitar a leitura de segredos contra um Vault e um Secrets Manager reais (hoje só dublês HTTP e `docker compose config` do `make up-secrets`, ADR 0014) e configurar no Postgres as duas credenciais da rotação da senha.
-- Definir o prazo de guarda (nenhum prazo legal foi fixado, ADR 0015) e, se o volume pedir, particionar o próprio `ledger_entries` com tabela de chaves.
-- Criar no realm `edge` do platform-edge o client público `payments-razao` (PKCE, redirect `/callback`) e validar o login OIDC contra o Keycloak real; hoje o adaptador foi testado só contra um emissor de teste e o `make up-oidc` só passou em `docker compose config` (ADR 0013).
-- Screenshots do painel em `docs/screenshots/` e vídeo de evidência pelos front-ends (adiados nesta rodada).
-- SBOM, assinatura da imagem e Trivy no CI; testes de carga com k6.
+Só o que falta de fato. O que foi escrito e ainda não rodou contra o serviço real está marcado como tal.
+
+**Validar fora do CI (código pronto, nunca exercitado no alvo)**
+
+- OIDC contra o Keycloak real: criar no realm `edge` do platform-edge o client público `payments-razao` (PKCE, redirect `/callback`) e alinhar o `KC_HOSTNAME` para o emissor ser alcançável do contêiner da API ([ADR 0013](docs/adr/0013-oidc-pkce-e-papeis-no-caso-de-uso.md)). Também falta provar o gRPC com um token de conta de serviço real.
+- Segredos contra um Vault e um Secrets Manager reais (hoje só dublês HTTP e `docker compose config`), e configurar no Postgres as duas credenciais da rotação da senha do banco ([ADR 0014](docs/adr/0014-segredos-por-porta-e-rotacao-sem-downtime.md)).
+- Chart Helm e manifesto ArgoCD em um cluster: o CI só renderiza ([ADR 0017](docs/adr/0017-deploy-em-kubernetes-com-helm-e-argocd.md)). O painel (`web/`) ainda não está no chart.
+- Teste de carga: rodar o k6 num ambiente de teste e fixar limiares a partir da medição ([loadtest/](loadtest/README.md)); os alertas do Prometheus também são limiares iniciais.
+
+**Decisões do autor**
+
+- Prazo de guarda dos dados: nenhum prazo legal foi definido, os prazos da retenção são configuráveis ([ADR 0015](docs/adr/0015-retencao-sem-perder-idempotencia-nem-razao.md)). Se o volume pedir, particionar o próprio `ledger_entries` exige uma tabela de chaves.
+- Assinatura da imagem (cosign): exige `id-token` no workflow e um registro, e fica com o autor ([ADR 0018](docs/adr/0018-supply-chain-no-ci-sbom-e-scan.md)).
+- Promoção por tag no ArgoCD e a política de quem cria a tag ([ADR 0017](docs/adr/0017-deploy-em-kubernetes-com-helm-e-argocd.md)).
+
+**Previsto no design doc e não feito**
+
+- `LISTEN/NOTIFY` no relay para reduzir a latência do outbox, e CDC se o volume justificar.
+- Conciliação em SQL para volumes grandes (hoje em memória).
+- Testes de mutação no domínio.
+- Alerta para o job de conciliação com divergência (código 3); no Kubernetes, use a falha do CronJob.
+- Screenshots do painel em `docs/screenshots/` e vídeo de evidência pelos front-ends.
 
 ## Licença
 
