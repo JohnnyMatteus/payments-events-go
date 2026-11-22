@@ -22,6 +22,12 @@ platform-edge) para produção. Além disso, a checagem de papel morava no middl
   estado chama `app.Authorize(ctx, RoleOperator)` e usa o nome do ator na trilha de auditoria (não há mais parâmetro
   `operator` vindo do chamador). Falha fechado: sem ator, sem nome ou com papel desconhecido, nada acontece.
   Gatilhos de sistema (notificação do S3, cron) não passam por pessoa; só o pedido manual da conciliação exige ator.
+- **Identidade estável nos quatro olhos**: o `app.Actor` tem `ID` (`iss|sub` no OIDC, `dev:<operador>` no token de dev) e
+  `Name` (só exibição: `preferred_username` é mutável e reutilizável no Keycloak). `domain.CanApprove` compara o `ID`
+  e falha fechado sem ele; token sem `sub` nem autentica. A migração 0005 guarda `proposed_by_id`/`decided_by_id` e
+  marca os ajustes antigos como `legacy:<nome>`; neles o domínio compara também o nome, então ninguém aprova um
+  ajuste legado que propôs.
+- **`APP_ENV`** só aceita `dev` ou `production` (valor outro derruba a subida, sem normalizar maiúsculas).
 - **Token só para dev**: `OPERATOR_TOKENS` é recusado com `APP_ENV=production`, e definir `OIDC_ISSUER_URL` junto com
   `OPERATOR_TOKENS` derruba a subida. Sem nenhum dos dois a API de operação não é registrada.
 
@@ -30,6 +36,7 @@ platform-edge) para produção. Além disso, a checagem de papel morava no middl
 - Qualquer ponto de entrada novo herda a barreira, porque ela está no caso de uso.
 - O emissor precisa estar de pé na subida da API (discovery); sem ele o processo não sobe, em vez de aceitar tokens
   sem verificar.
+- O painel ainda esconde o botão de aprovar comparando nomes; é só dica visual, a recusa vem da API.
 - Sem revogação instantânea: vale o `accessTokenLifespan` do realm (5 minutos no platform-edge).
 - O adaptador foi exercitado contra um emissor OIDC de teste (discovery e JWKS), não contra o Keycloak real. O client
   público do painel (`payments-razao`, PKCE obrigatório, redirect `/callback`) precisa ser criado no realm do

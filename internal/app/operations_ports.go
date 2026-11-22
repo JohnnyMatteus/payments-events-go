@@ -295,6 +295,7 @@ type Adjustment struct {
 	Reason       string
 	Status       domain.AdjustmentStatus
 	ProposedBy   string
+	ProposedByID string
 	ProposedAt   time.Time
 	DecidedBy    string
 	DecidedAt    *time.Time
@@ -316,9 +317,9 @@ type CaseRepository interface {
 	PendingAdjustments(ctx context.Context) ([]Adjustment, error)
 	Explain(ctx context.Context, id int64, decide func(Case) error, operator, reason string) error
 	ProposeAdjustment(ctx context.Context, caseID int64, build func(Case) (domain.LedgerEntry, error),
-		operator, reason string) (Adjustment, error)
+		actor Actor, reason string) (Adjustment, error)
 	ApproveAdjustment(ctx context.Context, id int64, decide func(Adjustment) (Recording, error),
-		operator, note string) (Adjustment, error)
+		actor Actor, note string) (Adjustment, error)
 	RejectAdjustment(ctx context.Context, id int64, decide func(Adjustment) error,
-		operator, note string) (Adjustment, error)
+		actor Actor, note string) (Adjustment, error)
 }

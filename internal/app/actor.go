@@ -38,6 +38,9 @@ func (r Role) allows(min Role) bool {
 // Actor é a pessoa autenticada que pede uma operação. Quem o produz é o
 // adaptador de entrada (token de dev ou OIDC); o caso de uso só o consome.
 type Actor struct {
+	// ID é estável (emissor + sub no OIDC) e é o que as regras de auditoria
+	// comparam. Name é só para exibição: o provedor deixa o usuário mudá-lo.
+	ID   string
 	Name string
 	Role Role
 }
@@ -60,7 +63,7 @@ func ActorFrom(ctx context.Context) (Actor, bool) {
 // barreira de verdade; o middleware HTTP só autentica.
 func Authorize(ctx context.Context, min Role) (Actor, error) {
 	a, ok := ActorFrom(ctx)
-	if !ok || a.Name == "" {
+	if !ok || a.Name == "" || a.ID == "" {
 		return Actor{}, ErrUnauthenticated
 	}
 	if !a.Role.Valid() || !a.Role.allows(min) {

@@ -129,5 +129,6 @@ func (a *OperatorAuth) Authenticate(r *http.Request) (app.Actor, error) {
 	if !ok {
 		return app.Actor{}, ErrUnauthorized
 	}
-	return app.Actor{Name: who.operator, Role: who.role}, nil
+	// Em dev a identidade é o próprio operador do token; o prefixo evita colidir com um ID de OIDC.
+	return app.Actor{ID: "dev:" + strings.ToLower(who.operator), Name: who.operator, Role: who.role}, nil
 }

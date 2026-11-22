@@ -92,17 +92,17 @@ func (f *fakeCases) Explain(_ context.Context, _ int64, decide func(Case) error,
 }
 
 func (f *fakeCases) ProposeAdjustment(_ context.Context, _ int64, build func(Case) (domain.LedgerEntry, error),
-	operator, reason string) (Adjustment, error) {
+	actor Actor, reason string) (Adjustment, error) {
 	entry, err := build(f.c)
 	if err != nil {
 		return Adjustment{}, err
 	}
-	f.adj = Adjustment{ID: 7, CaseID: f.c.ID, Entry: entry, Reason: reason, Status: domain.AdjustmentProposed, ProposedBy: operator}
+	f.adj = Adjustment{ID: 7, CaseID: f.c.ID, Entry: entry, Reason: reason, Status: domain.AdjustmentProposed, ProposedBy: actor.Name, ProposedByID: actor.ID}
 	return f.adj, nil
 }
 
 func (f *fakeCases) ApproveAdjustment(_ context.Context, _ int64, decide func(Adjustment) (Recording, error),
-	_, _ string) (Adjustment, error) {
+	_ Actor, _ string) (Adjustment, error) {
 	if _, err := decide(f.adj); err != nil {
 		return Adjustment{}, err
 	}
@@ -197,21 +197,22 @@ func TestSettlementKeyRoundTrip(t *testing.T) {
 
 func asOperator(t *testing.T, name string) context.Context {
 	t.Helper()
-	return WithActor(t.Context(), Actor{Name: name, Role: RoleOperator})
+	return WithActor(t.Context(), Actor{ID: "dev:" + strings.ToLower(name), Name: name, Role: RoleOperator})
 }
 
 // Guardrail de autorização: nenhuma ação que mexe com dinheiro acontece sem
 // operador autenticado, e o leitor só consulta. O repositório nunca é tocado.
 func TestMutationsFailClosedWithoutOperatorRole(t *testing.T) {
-	reader := WithActor(t.Context(), Actor{Name: "carla", Role: RoleReader})
-	unknown := WithActor(t.Context(), Actor{Name: "x", Role: Role("admin")})
-	nameless := WithActor(t.Context(), Actor{Role: RoleOperator})
+	reader := WithActor(t.Context(), Actor{ID: "dev:carla", Name: "carla", Role: RoleReader})
+	unknown := WithActor(t.Context(), Actor{ID: "dev:x", Name: "x", Role: Role("admin")})
+	nameless := WithActor(t.Context(), Actor{ID: "dev:z", Role: RoleOperator})
 	cases := map[string]struct {
 		ctx  context.Context
 		want error
 	}{
 		"sem ator":           {t.Context(), ErrUnauthenticated},
 		"ator sem nome":      {nameless, ErrUnauthenticated},
+		"ator sem id":        {WithActor(t.Context(), Actor{Name: "x", Role: RoleOperator}), ErrUnauthenticated},
 		"leitor":             {reader, ErrForbidden},
 		"papel desconhecido": {unknown, ErrForbidden},
 	}

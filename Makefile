@@ -36,6 +36,10 @@ network: ## Cria a rede compartilhada portfolio-net do ecossistema
 up-portfolio: network ## Sobe o núcleo ligado à rede portfolio-net
 	$(CORE) -f docker-compose.yml -f docker-compose.portfolio.yml up -d --build --wait
 
+.PHONY: up-oidc
+up-oidc: network ## Sobe o núcleo com login OIDC (exige OIDC_ISSUER_URL, OIDC_AUTHORITY e OIDC_CLIENT_ID)
+	$(CORE) -f docker-compose.yml -f docker-compose.oidc.yml up -d --build --wait
+
 .PHONY: down
 down: ## Para os contêineres (mantém os volumes)
 	$(ALL) down

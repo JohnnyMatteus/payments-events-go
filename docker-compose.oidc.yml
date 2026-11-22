@@ -1,0 +1,26 @@
+# Override: operadores entram por OIDC (Keycloak do platform-edge) em vez do
+# token de dev. Use `make up-oidc`, com o platform-edge de pé na portfolio-net
+# (`make network`) e o client público do painel criado no realm (ADR 0013).
+#
+# O emissor precisa ser alcançável do contêiner da API pela mesma URL que vai
+# no "iss" dos tokens (ex.: KC_HOSTNAME=http://keycloak:8080 no platform-edge) e
+# o navegador precisa resolver esse nome. Variáveis obrigatórias:
+#   OIDC_ISSUER_URL   ex.: http://keycloak:8080/realms/edge
+#   OIDC_AUTHORITY    o mesmo emissor, como o navegador o enxerga
+#   OIDC_CLIENT_ID    ex.: payments-razao
+services:
+  api:
+    environment:
+      OPERATOR_TOKENS: ""
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:?defina OIDC_ISSUER_URL}
+    networks:
+      payments-net: {}
+      portfolio-net: {}
+  web:
+    environment:
+      OIDC_AUTHORITY: ${OIDC_AUTHORITY:?defina OIDC_AUTHORITY}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?defina OIDC_CLIENT_ID}
+
+networks:
+  portfolio-net:
+    external: true

@@ -49,7 +49,7 @@ func scanCase(row pgx.Row) (app.Case, error) {
 }
 
 const adjustmentColumns = `id, case_id, transaction_id, COALESCE(adjusts_transaction_id, ''), COALESCE(merchant_id, ''),
-	payment_id, direction, amount_cents, currency, occurred_at, reason, status, proposed_by, proposed_at,
+	payment_id, direction, amount_cents, currency, occurred_at, reason, status, proposed_by, COALESCE(proposed_by_id, ''), proposed_at,
 	COALESCE(decided_by, ''), decided_at, COALESCE(decision_note, ''), COALESCE(event_id, '')`
 
 func scanAdjustment(row pgx.Row) (app.Adjustment, error) {
@@ -62,7 +62,7 @@ func scanAdjustment(row pgx.Row) (app.Adjustment, error) {
 	)
 	err := row.Scan(&a.ID, &a.CaseID, &transaction, &a.Entry.AdjustsTransactionID, &a.Entry.MerchantID,
 		&a.Entry.PaymentID, &direction, &a.Entry.AmountCents, &currency, &a.Entry.OccurredAt, &a.Reason, &status,
-		&a.ProposedBy, &a.ProposedAt, &a.DecidedBy, &a.DecidedAt, &a.DecisionNote, &a.EventID)
+		&a.ProposedBy, &a.ProposedByID, &a.ProposedAt, &a.DecidedBy, &a.DecidedAt, &a.DecisionNote, &a.EventID)
 	a.Entry.TransactionID = transaction
 	a.Entry.Direction, a.Entry.Currency = domain.Direction(direction), domain.Currency(currency)
 	a.Entry.OccurredAt = a.Entry.OccurredAt.UTC()
@@ -156,7 +156,7 @@ func (r *CaseRepository) Explain(ctx context.Context, id int64, decide func(app.
 
 // ProposeAdjustment grava o ajuste proposto e marca o caso.
 func (r *CaseRepository) ProposeAdjustment(ctx context.Context, caseID int64, build func(app.Case) (domain.LedgerEntry, error),
-	operator, reason string) (app.Adjustment, error) {
+	actor app.Actor, reason string) (app.Adjustment, error) {
 	var out app.Adjustment
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		c, err := lockCase(ctx, tx, caseID)
@@ -169,11 +169,11 @@ func (r *CaseRepository) ProposeAdjustment(ctx context.Context, caseID int64, bu
 		}
 		out, err = scanAdjustment(tx.QueryRow(ctx, `
 			INSERT INTO ledger_adjustments (case_id, transaction_id, adjusts_transaction_id, merchant_id, payment_id,
-				direction, amount_cents, currency, occurred_at, reason, proposed_by)
-			VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), $5, $6, $7, $8, $9, $10, $11)
+				direction, amount_cents, currency, occurred_at, reason, proposed_by, proposed_by_id)
+			VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), $5, $6, $7, $8, $9, $10, $11, $12)
 			RETURNING `+adjustmentColumns,
 			caseID, entry.TransactionID, entry.AdjustsTransactionID, entry.MerchantID, entry.PaymentID,
-			string(entry.Direction), entry.AmountCents, string(entry.Currency), entry.OccurredAt, reason, operator))
+			string(entry.Direction), entry.AmountCents, string(entry.Currency), entry.OccurredAt, reason, actor.Name, actor.ID))
 		if isUniqueViolation(err) {
 			return fmt.Errorf("%w: the case already has a pending adjustment", app.ErrConflict)
 		}
@@ -204,7 +204,7 @@ func lockAdjustment(ctx context.Context, tx pgx.Tx, id int64) (app.Adjustment, e
 // ApproveAdjustment grava o lançamento e a mensagem de outbox na mesma
 // transação que aprova o ajuste e resolve o caso.
 func (r *CaseRepository) ApproveAdjustment(ctx context.Context, id int64, decide func(app.Adjustment) (app.Recording, error),
-	operator, note string) (app.Adjustment, error) {
+	actor app.Actor, note string) (app.Adjustment, error) {
 	var out app.Adjustment
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		a, err := lockAdjustment(ctx, tx, id)
@@ -223,15 +223,15 @@ func (r *CaseRepository) ApproveAdjustment(ctx context.Context, id int64, decide
 			return fmt.Errorf("%w: ledger already has transaction %s", app.ErrConflict, rec.Entry.TransactionID)
 		}
 		out, err = scanAdjustment(tx.QueryRow(ctx, `
-			UPDATE ledger_adjustments SET status = 'approved', decided_by = $2, decided_at = now(),
+			UPDATE ledger_adjustments SET status = 'approved', decided_by = $2, decided_by_id = $5, decided_at = now(),
 				decision_note = NULLIF($3, ''), event_id = $4
-			WHERE id = $1 RETURNING `+adjustmentColumns, id, operator, note, rec.Event.ID))
+			WHERE id = $1 RETURNING `+adjustmentColumns, id, actor.Name, note, rec.Event.ID, actor.ID))
 		if err != nil {
 			return fmt.Errorf("approve adjustment: %w", err)
 		}
 		_, err = tx.Exec(ctx, `
 			UPDATE divergence_cases SET status = 'resolved', resolved_by = $2, resolved_at = now(), updated_at = now()
-			WHERE id = $1`, a.CaseID, operator)
+			WHERE id = $1`, a.CaseID, actor.Name)
 		if err != nil {
 			return fmt.Errorf("resolve case: %w", err)
 		}
@@ -242,7 +242,7 @@ func (r *CaseRepository) ApproveAdjustment(ctx context.Context, id int64, decide
 
 // RejectAdjustment recusa o ajuste e reabre o caso.
 func (r *CaseRepository) RejectAdjustment(ctx context.Context, id int64, decide func(app.Adjustment) error,
-	operator, note string) (app.Adjustment, error) {
+	actor app.Actor, note string) (app.Adjustment, error) {
 	var out app.Adjustment
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		a, err := lockAdjustment(ctx, tx, id)
@@ -253,8 +253,8 @@ func (r *CaseRepository) RejectAdjustment(ctx context.Context, id int64, decide 
 			return err
 		}
 		out, err = scanAdjustment(tx.QueryRow(ctx, `
-			UPDATE ledger_adjustments SET status = 'rejected', decided_by = $2, decided_at = now(), decision_note = $3
-			WHERE id = $1 RETURNING `+adjustmentColumns, id, operator, note))
+			UPDATE ledger_adjustments SET status = 'rejected', decided_by = $2, decided_by_id = $4, decided_at = now(), decision_note = $3
+			WHERE id = $1 RETURNING `+adjustmentColumns, id, actor.Name, note, actor.ID))
 		if err != nil {
 			return fmt.Errorf("reject adjustment: %w", err)
 		}

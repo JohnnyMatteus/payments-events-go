@@ -63,12 +63,31 @@ func CanExplain(status CaseStatus) error {
 	return nil
 }
 
-// CanApprove aplica a regra dos quatro olhos: quem propõe não aprova.
-func CanApprove(status AdjustmentStatus, proposedBy, approver string) error {
+// Identity é quem agiu: ID é estável (emissor + sub no OIDC) e é o que as
+// regras comparam; Name é só para exibição e pode mudar.
+type Identity struct {
+	ID   string
+	Name string
+}
+
+// LegacyIDPrefix marca ajustes anteriores à identidade estável: só se sabe o nome.
+const LegacyIDPrefix = "legacy:"
+
+// CanApprove aplica a regra dos quatro olhos: quem propõe não aprova. Compara
+// o ID estável; sem ID do proponente ou do aprovador, falha fechado. Em
+// ajuste legado (só o nome é conhecido) compara também o nome.
+func CanApprove(status AdjustmentStatus, proposer, approver Identity) error {
 	if status != AdjustmentProposed {
 		return fmt.Errorf("%w: status %s", ErrAdjustmentClosed, status)
 	}
-	if strings.EqualFold(proposedBy, approver) {
+	if proposer.ID == "" || approver.ID == "" {
+		return ErrSameOperator
+	}
+	if proposer.ID == approver.ID {
+		return ErrSameOperator
+	}
+	if strings.HasPrefix(proposer.ID, LegacyIDPrefix) &&
+		(strings.EqualFold(proposer.Name, approver.Name) || proposer.ID == LegacyIDPrefix+strings.ToLower(approver.Name)) {
 		return ErrSameOperator
 	}
 	return nil

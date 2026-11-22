@@ -41,7 +41,7 @@ type stubCases struct {
 }
 
 func (s stubCases) ApproveAdjustment(_ context.Context, _ int64, decide func(app.Adjustment) (app.Recording, error),
-	_, _ string) (app.Adjustment, error) {
+	_ app.Actor, _ string) (app.Adjustment, error) {
 	_, err := decide(s.adjustment)
 	return s.adjustment, err
 }
@@ -107,7 +107,7 @@ func TestReprocessRecordsOperatorAndRequiresReason(t *testing.T) {
 }
 
 func TestApproveByProposerIsForbidden(t *testing.T) {
-	cases := stubCases{adjustment: app.Adjustment{ID: 1, Status: domain.AdjustmentProposed, ProposedBy: "ana"}}
+	cases := stubCases{adjustment: app.Adjustment{ID: 1, Status: domain.AdjustmentProposed, ProposedBy: "ana", ProposedByID: "dev:ana"}}
 	mux := newTestMux(t, AdminDeps{CaseService: app.NewCaseService(cases), Cases: cases})
 	rec := call(mux, http.MethodPost, "/api/v1/adjustments/1/approve", "token-da-ana", `{}`)
 	if rec.Code != http.StatusForbidden {
@@ -138,7 +138,7 @@ func TestDeadLetterListCarriesAgeAndReprocessability(t *testing.T) {
 
 func TestReaderRoleCanQueryButNotAct(t *testing.T) {
 	dl := &stubDeadLetters{}
-	cases := stubCases{adjustment: app.Adjustment{ID: 1, Status: domain.AdjustmentProposed, ProposedBy: "bruno"}}
+	cases := stubCases{adjustment: app.Adjustment{ID: 1, Status: domain.AdjustmentProposed, ProposedBy: "bruno", ProposedByID: "dev:bruno"}}
 	mux := newTestMux(t, AdminDeps{
 		Reader: stubReader{}, DeadLetters: app.NewDeadLetterService(dl),
 		CaseService: app.NewCaseService(cases), Cases: cases,

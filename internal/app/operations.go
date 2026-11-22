@@ -244,7 +244,7 @@ func (s *CaseService) ProposeAdjustment(ctx context.Context, caseID int64, reaso
 			return domain.LedgerEntry{}, err
 		}
 		return domain.AdjustmentFor(c.Divergence, "c"+strconv.FormatInt(c.ID, 10))
-	}, actor.Name, reason)
+	}, actor, reason)
 }
 
 // ApproveAdjustment aplica a regra dos quatro olhos e grava o ajuste no
@@ -254,13 +254,14 @@ func (s *CaseService) ApproveAdjustment(ctx context.Context, id int64, note stri
 	if err != nil {
 		return Adjustment{}, err
 	}
-	operator := actor.Name
 	return s.repo.ApproveAdjustment(ctx, id, func(a Adjustment) (Recording, error) {
-		if err := domain.CanApprove(a.Status, a.ProposedBy, operator); err != nil {
+		err := domain.CanApprove(a.Status, domain.Identity{ID: a.ProposedByID, Name: a.ProposedBy},
+			domain.Identity{ID: actor.ID, Name: actor.Name})
+		if err != nil {
 			return Recording{}, err
 		}
-		return adjustmentRecording(a, operator)
-	}, operator, strings.TrimSpace(note))
+		return adjustmentRecording(a, actor.Name)
+	}, actor, strings.TrimSpace(note))
 }
 
 // RejectAdjustment recusa o ajuste e devolve o caso para aberto.
@@ -278,7 +279,7 @@ func (s *CaseService) RejectAdjustment(ctx context.Context, id int64, note strin
 			return fmt.Errorf("%w: status %s", domain.ErrAdjustmentClosed, a.Status)
 		}
 		return nil
-	}, actor.Name, note)
+	}, actor, note)
 }
 
 func adjustmentRecording(a Adjustment, approver string) (Recording, error) {

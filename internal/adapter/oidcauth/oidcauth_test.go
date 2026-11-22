@@ -1,12 +1,16 @@
 package oidcauth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +19,7 @@ import (
 
 	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/httpapi"
 	"github.com/JohnnyMatteus/payments-events-go/internal/app"
+	"github.com/JohnnyMatteus/payments-events-go/internal/domain"
 )
 
 // idp é um emissor OIDC mínimo (discovery e JWKS) para provar a verificação
@@ -52,6 +57,7 @@ type tokenOpts struct {
 	audience string
 	roles    []string
 	user     string
+	sub      *string
 	expires  time.Duration
 	signer   *rsa.PrivateKey
 }
@@ -72,9 +78,13 @@ func (p *idp) token(t *testing.T, o tokenOpts) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sub := "sub-1"
+	if o.sub != nil {
+		sub = *o.sub
+	}
 	now := time.Now()
 	raw, err := jwt.Signed(sig).Claims(jwt.Claims{
-		Issuer: p.srv.URL, Subject: "sub-1", Audience: jwt.Audience{o.audience},
+		Issuer: p.srv.URL, Subject: sub, Audience: jwt.Audience{o.audience},
 		IssuedAt: jwt.NewNumericDate(now), Expiry: jwt.NewNumericDate(now.Add(o.expires)),
 	}).Claims(map[string]any{
 		"preferred_username": o.user, "realm_access": map[string]any{"roles": o.roles},
@@ -184,5 +194,54 @@ func TestOIDCReaderIsForbiddenOnActionsThroughRouter(t *testing.T) {
 	}
 	if got := post("lixo"); got != http.StatusUnauthorized {
 		t.Fatalf("token inválido: status = %d, want 401", got)
+	}
+}
+
+type stubCases struct {
+	app.CaseRepository
+	adjustment app.Adjustment
+	approved   bool
+}
+
+func (s *stubCases) ApproveAdjustment(_ context.Context, _ int64, decide func(app.Adjustment) (app.Recording, error),
+	_ app.Actor, _ string) (app.Adjustment, error) {
+	if _, err := decide(s.adjustment); err != nil {
+		return app.Adjustment{}, err
+	}
+	s.approved = true
+	return s.adjustment, nil
+}
+
+// Quatro olhos pela identidade estável: quem propôs não aprova mesmo trocando
+// o nome de usuário e entrando de novo; sem sub o token nem autentica.
+func TestFourEyesUsesIssuerAndSubNotUsername(t *testing.T) {
+	p := newIDP(t)
+	a := newAuth(t, p)
+	cases := &stubCases{adjustment: app.Adjustment{
+		ID: 1, Status: domain.AdjustmentProposed, ProposedBy: "ana", ProposedByID: p.srv.URL + "|sub-ana",
+	}}
+	mux := http.NewServeMux()
+	httpapi.NewAdminHandler(httpapi.AdminDeps{
+		CaseService: app.NewCaseService(cases), Cases: cases, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}).Register(mux, a)
+	approve := func(token string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/adjustments/1/approve", strings.NewReader(`{}`))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	str := func(v string) *string { return &v }
+	renamed := p.token(t, tokenOpts{roles: []string{"payments.write"}, user: "ana.renomeada", sub: str("sub-ana")})
+	if got := approve(renamed); got != http.StatusForbidden || cases.approved {
+		t.Fatalf("mesmo sub com outro username: status = %d approved = %v, want 403 e nada aprovado", got, cases.approved)
+	}
+	namesake := p.token(t, tokenOpts{roles: []string{"payments.write"}, user: "ana", sub: str("sub-outra-pessoa")})
+	if got := approve(namesake); got != http.StatusOK || !cases.approved {
+		t.Fatalf("outra pessoa com o mesmo username: status = %d, want 200", got)
+	}
+	cases.approved = false
+	if got := approve(p.token(t, tokenOpts{roles: []string{"payments.write"}, user: "ana", sub: str("")})); got != http.StatusUnauthorized || cases.approved {
+		t.Fatalf("sem sub: status = %d, want 401", got)
 	}
 }

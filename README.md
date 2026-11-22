@@ -175,7 +175,7 @@ Para defender o núcleo numa entrevista: [roteiro de idempotência](docs/roteiro
 - Helm chart e manifests Kubernetes (Deployments, CronJob de conciliação, HPA, probes) e GitOps com ArgoCD.
 - Segredos do webhook no Secrets Manager/Vault.
 - Retenção e particionamento de `processed_events` e `ledger_entries`; limpeza do outbox publicado.
-- Criar no realm `edge` do platform-edge o client público `payments-razao` (PKCE, redirect `/callback`) e validar o login OIDC contra o Keycloak real; hoje o adaptador foi testado só contra um emissor de teste (ADR 0013).
+- Criar no realm `edge` do platform-edge o client público `payments-razao` (PKCE, redirect `/callback`) e validar o login OIDC contra o Keycloak real; hoje o adaptador foi testado só contra um emissor de teste e o `make up-oidc` só passou em `docker compose config` (ADR 0013).
 - gRPC interno para consulta de saldo.
 - Screenshots do painel em `docs/screenshots/` e vídeo de evidência pelos front-ends (adiados nesta rodada).
 - SBOM, assinatura da imagem e Trivy no CI; testes de carga com k6.

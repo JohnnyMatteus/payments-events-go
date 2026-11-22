@@ -175,5 +175,5 @@ func TestObjectClaimsAreAtomicAndReleasable(t *testing.T) {
 
 // as devolve um contexto com um operador autenticado, como o middleware faz.
 func as(ctx context.Context, name string) context.Context {
-	return app.WithActor(ctx, app.Actor{Name: name, Role: app.RoleOperator})
+	return app.WithActor(ctx, app.Actor{ID: "dev:" + name, Name: name, Role: app.RoleOperator})
 }

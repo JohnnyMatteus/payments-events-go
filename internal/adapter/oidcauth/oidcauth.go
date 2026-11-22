@@ -82,14 +82,15 @@ func (a *Authenticator) Authenticate(r *http.Request) (app.Actor, error) {
 	if !ok {
 		return app.Actor{}, httpapi.ErrNoRole
 	}
-	name := c.PreferredUsername
-	if name == "" {
-		name = c.Subject
-	}
-	if name == "" {
+	// Sem sub não há identidade estável: falha fechado. O username é só exibição.
+	if tok.Issuer == "" || tok.Subject == "" {
 		return app.Actor{}, httpapi.ErrUnauthorized
 	}
-	return app.Actor{Name: name, Role: role}, nil
+	name := c.PreferredUsername
+	if name == "" {
+		name = tok.Subject
+	}
+	return app.Actor{ID: tok.Issuer + "|" + tok.Subject, Name: name, Role: role}, nil
 }
 
 // roleOf escolhe o papel mais forte entre as roles do token.

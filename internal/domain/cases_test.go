@@ -82,13 +82,13 @@ func TestAdjustmentRefusedForDuplicateOrCurrency(t *testing.T) {
 
 func TestFourEyes(t *testing.T) {
 	t.Parallel()
-	if err := domain.CanApprove(domain.AdjustmentProposed, "ana", "ANA"); !errors.Is(err, domain.ErrSameOperator) {
+	if err := domain.CanApprove(domain.AdjustmentProposed, domain.Identity{ID: "i|1", Name: "ana"}, domain.Identity{ID: "i|1", Name: "outro nome"}); !errors.Is(err, domain.ErrSameOperator) {
 		t.Fatalf("same operator: err = %v", err)
 	}
-	if err := domain.CanApprove(domain.AdjustmentApproved, "ana", "bruno"); !errors.Is(err, domain.ErrAdjustmentClosed) {
+	if err := domain.CanApprove(domain.AdjustmentApproved, domain.Identity{ID: "i|1", Name: "ana"}, domain.Identity{ID: "i|2", Name: "bruno"}); !errors.Is(err, domain.ErrAdjustmentClosed) {
 		t.Fatalf("closed: err = %v", err)
 	}
-	if err := domain.CanApprove(domain.AdjustmentProposed, "ana", "bruno"); err != nil {
+	if err := domain.CanApprove(domain.AdjustmentProposed, domain.Identity{ID: "i|1", Name: "ana"}, domain.Identity{ID: "i|2", Name: "bruno"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := domain.CanExplain(domain.CaseResolved); !errors.Is(err, domain.ErrCaseNotOpen) {
@@ -96,5 +96,28 @@ func TestFourEyes(t *testing.T) {
 	}
 	if _, err := domain.RequireReason("   "); !errors.Is(err, domain.ErrReasonRequired) {
 		t.Fatalf("reason: err = %v", err)
+	}
+}
+
+func TestCanApproveUsesStableIdentityAndFailsClosed(t *testing.T) {
+	t.Parallel()
+	same := func(p, a domain.Identity) bool {
+		return errors.Is(domain.CanApprove(domain.AdjustmentProposed, p, a), domain.ErrSameOperator)
+	}
+	if !same(domain.Identity{ID: "i|1", Name: "ana"}, domain.Identity{ID: "i|1", Name: "ana.nova"}) {
+		t.Error("mesmo ID com nome diferente deve ser a mesma pessoa")
+	}
+	if same(domain.Identity{ID: "i|1", Name: "ana"}, domain.Identity{ID: "i|2", Name: "ana"}) {
+		t.Error("IDs diferentes são pessoas diferentes mesmo com o mesmo nome de exibição")
+	}
+	if !same(domain.Identity{}, domain.Identity{ID: "i|2", Name: "bruno"}) || !same(domain.Identity{ID: "i|1"}, domain.Identity{}) {
+		t.Error("identidade ausente deve falhar fechado")
+	}
+	legacy := domain.Identity{ID: "legacy:ana", Name: "ana"}
+	if !same(legacy, domain.Identity{ID: "i|9", Name: "ANA"}) {
+		t.Error("ajuste legado: o mesmo nome não pode aprovar")
+	}
+	if same(legacy, domain.Identity{ID: "i|9", Name: "bruno"}) {
+		t.Error("ajuste legado: outra pessoa pode aprovar")
 	}
 }
