@@ -508,7 +508,7 @@ const file_balance_v1_balance_proto_rawDesc = "" +
 	"\x0eBalanceService\x12g\n" +
 	"\x11GetPaymentBalance\x12-.payments.balance.v1.GetPaymentBalanceRequest\x1a#.payments.balance.v1.PaymentBalance\x12{\n" +
 	"\x14ListMerchantBalances\x120.payments.balance.v1.ListMerchantBalancesRequest\x1a1.payments.balance.v1.ListMerchantBalancesResponse\x12x\n" +
-	"\x13ListPaymentBalances\x12/.payments.balance.v1.ListPaymentBalancesRequest\x1a0.payments.balance.v1.ListPaymentBalancesResponseBZZXgithub.com/JohnnyMatteus/payments-events-go/internal/adapter/grpcapi/balancev1;balancev1b\x06proto3"
+	"\x13ListPaymentBalances\x12/.payments.balance.v1.ListPaymentBalancesRequest\x1a0.payments.balance.v1.ListPaymentBalancesResponseB[ZYgithub.com/JohnnyMatteus/payments-events-go/internal/adapter/grpcapi/balance/v1;balancev1b\x06proto3"
 
 var (
 	file_balance_v1_balance_proto_rawDescOnce sync.Once

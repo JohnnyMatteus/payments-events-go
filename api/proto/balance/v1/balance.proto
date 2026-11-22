@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package payments.balance.v1;
 
-option go_package = "github.com/JohnnyMatteus/payments-events-go/internal/adapter/grpcapi/balancev1;balancev1";
+option go_package = "github.com/JohnnyMatteus/payments-events-go/internal/adapter/grpcapi/balance/v1;balancev1";
 
 // BalanceService é a consulta interna de saldo para outros serviços. Só leitura.
 //

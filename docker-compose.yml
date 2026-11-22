@@ -142,11 +142,7 @@ services:
       # Baixo de propósito no ambiente local, para o limite ser visível na demo.
       WEBHOOK_RATE_LIMIT: ${WEBHOOK_RATE_LIMIT:-20}
       WEBHOOK_RATE_WINDOW: ${WEBHOOK_RATE_WINDOW:-1m}
-      # gRPC interno de saldo (ADR 0016), com o mesmo login da API; sem TLS só em dev.
-      GRPC_ADDR: ":9091"
-    ports:
-      - "${API_PORT:-8085}:8080"
-      - "${GRPC_PORT:-9191}:9091"
+    ports: ["${API_PORT:-8085}:8080"]
     depends_on:
       migrate: {condition: service_completed_successfully}
       redis: {condition: service_healthy}

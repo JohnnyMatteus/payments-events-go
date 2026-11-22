@@ -24,7 +24,8 @@ API gRPC interna.
   como no HTTP.
 - **Transporte**: `GRPC_ADDR` liga o servidor dentro do processo `api` (vazio, desligado). Em `APP_ENV=production`
   exige `GRPC_TLS_CERT_FILE`/`GRPC_TLS_KEY_FILE` (o token não trafega em texto claro); em dev aceita texto claro com
-  aviso no log. Sem autenticação configurada, o processo recusa subir com gRPC ligado.
+  aviso no log. No compose é opt-in (`make up-grpc`, publicado só em `127.0.0.1`): o modo sem autenticação
+  (`OPERATOR_TOKENS=` vazio) continua subindo com o webhook, sem gRPC. Sem autenticação configurada, o processo recusa subir com gRPC ligado.
 
 ## Consequências
 
