@@ -24,7 +24,7 @@ func NewLedgerReader(pool *pgxpool.Pool) *LedgerReader {
 // EntriesBetween devolve os lançamentos com occurred_at em [from, to).
 func (r *LedgerReader) EntriesBetween(ctx context.Context, from, to time.Time) ([]domain.LedgerEntry, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT event_id, transaction_id, payment_id, direction, amount_cents, currency, occurred_at
+		SELECT event_id, COALESCE(merchant_id, ''), COALESCE(adjusts_transaction_id, ''), transaction_id, payment_id, direction, amount_cents, currency, occurred_at
 		FROM ledger_entries
 		WHERE occurred_at >= $1 AND occurred_at < $2
 		ORDER BY occurred_at, id`, from, to)
@@ -37,7 +37,7 @@ func (r *LedgerReader) EntriesBetween(ctx context.Context, from, to time.Time) (
 			direction string
 			currency  string
 		)
-		err := row.Scan(&e.EventID, &e.TransactionID, &e.PaymentID, &direction, &e.AmountCents, &currency, &e.OccurredAt)
+		err := row.Scan(&e.EventID, &e.MerchantID, &e.AdjustsTransactionID, &e.TransactionID, &e.PaymentID, &direction, &e.AmountCents, &currency, &e.OccurredAt)
 		e.Direction = domain.Direction(direction)
 		e.Currency = domain.Currency(currency)
 		e.OccurredAt = e.OccurredAt.UTC()

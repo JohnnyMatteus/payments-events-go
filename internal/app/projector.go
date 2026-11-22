@@ -26,6 +26,24 @@ func NewBalanceProjector(name string, repo ProjectionRepository, logger *slog.Lo
 // Handle aplica uma mensagem. Erros que embrulham ErrPermanent não devem ser
 // tentados de novo; os demais são transitórios.
 func (p *BalanceProjector) Handle(ctx context.Context, messageID string, body []byte) error {
+	if err := decodeLedgerMessage(messageID, body); err != nil {
+		return err
+	}
+	var msg LedgerEntryRecorded
+	_ = json.Unmarshal(body, &msg)
+	applied, err := p.repo.ApplyOnce(ctx, p.name, messageID, msg)
+	if err != nil {
+		return fmt.Errorf("apply message %s: %w", messageID, err)
+	}
+	if !applied {
+		p.logger.InfoContext(ctx, "duplicate message skipped", slog.String("message_id", messageID))
+	}
+	return nil
+}
+
+// decodeLedgerMessage valida o contrato da mensagem; erros embrulham
+// ErrPermanent.
+func decodeLedgerMessage(messageID string, body []byte) error {
 	if messageID == "" {
 		return fmt.Errorf("%w: message without message_id", ErrPermanent)
 	}
@@ -35,13 +53,6 @@ func (p *BalanceProjector) Handle(ctx context.Context, messageID string, body []
 	}
 	if err := msg.Validate(); err != nil {
 		return fmt.Errorf("%w: message %s: %w", ErrPermanent, messageID, err)
-	}
-	applied, err := p.repo.ApplyOnce(ctx, p.name, messageID, msg)
-	if err != nil {
-		return fmt.Errorf("apply message %s: %w", messageID, err)
-	}
-	if !applied {
-		p.logger.InfoContext(ctx, "duplicate message skipped", slog.String("message_id", messageID))
 	}
 	return nil
 }

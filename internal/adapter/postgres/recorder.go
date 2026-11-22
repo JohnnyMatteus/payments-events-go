@@ -34,6 +34,16 @@ func NewEventRecorder(pool *pgxpool.Pool) *EventRecorder {
 	return &EventRecorder{pool: pool}
 }
 
+// CountRedelivery soma uma entrega ao evento que o atalho de idempotência
+// respondeu sem ir ao banco.
+func (r *EventRecorder) CountRedelivery(ctx context.Context, eventID string) error {
+	if _, err := r.pool.Exec(ctx,
+		`UPDATE processed_events SET deliveries = deliveries + 1 WHERE event_id = $1`, eventID); err != nil {
+		return fmt.Errorf("count redelivery of %s: %w", eventID, err)
+	}
+	return nil
+}
+
 // Record grava evento, lançamento e outbox numa única transação.
 //
 // A idempotência vem do INSERT ... ON CONFLICT DO NOTHING em processed_events:
@@ -60,10 +70,13 @@ func (r *EventRecorder) Record(ctx context.Context, rec app.Recording) (outcome 
 	}
 
 	err = pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
-		outcome, err = r.record(ctx, tx, rec, payload)
+		outcome, err = record(ctx, tx, rec, payload)
 		return err
 	})
 	if errors.Is(err, errDuplicateEvent) {
+		if cErr := r.CountRedelivery(ctx, rec.Event.ID); cErr != nil {
+			return "", cErr
+		}
 		return app.OutcomeDuplicate, nil
 	}
 	if err != nil {
@@ -72,7 +85,7 @@ func (r *EventRecorder) Record(ctx context.Context, rec app.Recording) (outcome 
 	return outcome, nil
 }
 
-func (r *EventRecorder) record(ctx context.Context, tx pgx.Tx, rec app.Recording, payload []byte) (app.IngestOutcome, error) {
+func record(ctx context.Context, tx pgx.Tx, rec app.Recording, payload []byte) (app.IngestOutcome, error) {
 	initial := app.OutcomeRecorded
 	if rec.Entry == nil {
 		initial = app.OutcomeIgnored
@@ -93,11 +106,17 @@ func (r *EventRecorder) record(ctx context.Context, tx pgx.Tx, rec app.Recording
 	}
 
 	e := rec.Entry
+	kind := "provider"
+	if rec.Event.Type == app.EventTypeLedgerAdjustment {
+		kind = "adjustment"
+	}
 	tag, err = tx.Exec(ctx, `
-		INSERT INTO ledger_entries (event_id, transaction_id, payment_id, direction, amount_cents, currency, occurred_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO ledger_entries (event_id, merchant_id, transaction_id, payment_id, direction, amount_cents,
+			currency, occurred_at, kind, adjusts_transaction_id)
+		VALUES ($1, NULLIF($2, ''), $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''))
 		ON CONFLICT (transaction_id) DO NOTHING`,
-		e.EventID, e.TransactionID, e.PaymentID, string(e.Direction), e.AmountCents, string(e.Currency), e.OccurredAt)
+		e.EventID, e.MerchantID, e.TransactionID, e.PaymentID, string(e.Direction), e.AmountCents,
+		string(e.Currency), e.OccurredAt, kind, e.AdjustsTransactionID)
 	if err != nil {
 		return "", fmt.Errorf("insert ledger entry: %w", err)
 	}
