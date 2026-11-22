@@ -291,8 +291,10 @@ func (r *OperationsReader) PaymentBalances(ctx context.Context, merchantID, curs
 }
 
 // LedgerEntries lista os lançamentos por id crescente. O cursor é o id do
-// último lançamento da página anterior (paginação por chave: não pula nem
-// repete linhas quando chegam lançamentos novos, que só entram no fim).
+// último lançamento da página anterior. Os ids são sorteados no INSERT e as
+// transações confirmam fora de ordem, então só se devolve até o limite estável
+// (stableLedgerBound): nenhum id menor ou igual a ele pode aparecer depois, e a
+// paginação não pula linha (ADR 0019).
 func (r *OperationsReader) LedgerEntries(ctx context.Context, f app.LedgerFilter) (app.Page[app.LedgerView], error) {
 	var after int64
 	if f.Cursor != "" {
@@ -303,12 +305,16 @@ func (r *OperationsReader) LedgerEntries(ctx context.Context, f app.LedgerFilter
 		after = n
 	}
 	size := pageSize(f.Limit)
+	bound, err := stableLedgerBound(ctx, r.pool)
+	if err != nil {
+		return app.Page[app.LedgerView]{}, err
+	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, transaction_id, payment_id, COALESCE(merchant_id, ''), direction, amount_cents, currency, kind,
 			COALESCE(adjusts_transaction_id, ''), occurred_at, recorded_at
 		FROM ledger_entries
-		WHERE ($1 = '' OR merchant_id = $1) AND ($2 = '' OR payment_id = $2) AND id > $3
-		ORDER BY id LIMIT $4`, f.MerchantID, f.PaymentID, after, size+1)
+		WHERE ($1 = '' OR merchant_id = $1) AND ($2 = '' OR payment_id = $2) AND id > $3 AND id <= $5
+		ORDER BY id LIMIT $4`, f.MerchantID, f.PaymentID, after, size+1, bound)
 	if err != nil {
 		return app.Page[app.LedgerView]{}, fmt.Errorf("query ledger entries: %w", err)
 	}

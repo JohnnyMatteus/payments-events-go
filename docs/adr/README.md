@@ -22,3 +22,4 @@ Formato: Contexto, Decisão, Consequências e Alternativas. Um ADR por decisão;
 | [0016](0016-grpc-interno-de-saldo-autenticado.md) | gRPC interno de saldo, autenticado por token OIDC | Aceito |
 | [0017](0017-deploy-em-kubernetes-com-helm-e-argocd.md) | Deploy em Kubernetes com Helm e ArgoCD, sincronização manual e revisão por tag | Aceito |
 | [0018](0018-supply-chain-no-ci-sbom-e-scan.md) | Cadeia de suprimentos no CI: SBOM (syft) e scan (Trivy); assinatura pendente | Aceito |
+| [0019](0019-leitura-do-razao-por-cursor-sem-pular-linhas.md) | Leitura do razão por cursor sem pular linhas (lock de ordem entre escritores e leitor) | Aceito |

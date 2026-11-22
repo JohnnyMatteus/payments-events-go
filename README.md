@@ -165,6 +165,7 @@ LocalStack, o relatório de conciliação (faltando, sobrando e valor divergente
 | Segredos do webhook e do banco por porta (Vault e Secrets Manager), com rotação sem downtime | [0014](docs/adr/0014-segredos-por-porta-e-rotacao-sem-downtime.md) |
 | Retenção: ledger imutável (gatilho) e exportado por mês, payloads arquivados em partições, outbox publicado limpo | [0015](docs/adr/0015-retencao-sem-perder-idempotencia-nem-razao.md) |
 | gRPC interno de saldo (só leitura) com token OIDC, papel checado no caso de uso e TLS obrigatório em produção | [0016](docs/adr/0016-grpc-interno-de-saldo-autenticado.md) |
+| Leitura do razão por cursor sem pular linha, com lock de ordem entre escritores e leitor | [0019](docs/adr/0019-leitura-do-razao-por-cursor-sem-pular-linhas.md) |
 | Deploy em Kubernetes com Helm e ArgoCD, sincronização manual e revisão fixada por tag | [0017](docs/adr/0017-deploy-em-kubernetes-com-helm-e-argocd.md) |
 | Cadeia de suprimentos no CI: SBOM (syft) e scan (Trivy) por digest; assinatura pendente | [0018](docs/adr/0018-supply-chain-no-ci-sbom-e-scan.md) |
 
