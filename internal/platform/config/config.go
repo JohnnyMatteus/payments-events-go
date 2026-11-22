@@ -47,6 +47,11 @@ type Config struct {
 
 	// Retenção (ADR 0015). Os prazos são configuráveis porque nenhum prazo
 	// legal foi definido; os padrões são só pontos de partida.
+	// ReconcileMode: "memory" (padrão) compara em memória; "sql" compara no
+	// banco, sem carregar os lançamentos do período (ADR 0022).
+	ReconcileMode           string
+	ReconcileIncludeMatches bool
+
 	LedgerArchiveBucket        string
 	RetentionOutboxAfter       time.Duration
 	RetentionEventsAfter       time.Duration
@@ -119,6 +124,9 @@ func Load(getenv func(string) string) (Config, error) {
 		GRPCTLSCertFile: p.str("GRPC_TLS_CERT_FILE", ""),
 		GRPCTLSKeyFile:  p.str("GRPC_TLS_KEY_FILE", ""),
 
+		ReconcileMode:           p.str("RECONCILE_MODE", "memory"),
+		ReconcileIncludeMatches: p.boolean("RECONCILE_INCLUDE_MATCHES", true),
+
 		LedgerArchiveBucket:        p.str("LEDGER_ARCHIVE_BUCKET", "pagafacil-ledger-archive"),
 		RetentionOutboxAfter:       p.duration("RETENTION_OUTBOX_AFTER", 7*24*time.Hour),
 		RetentionEventsAfter:       p.duration("RETENTION_EVENTS_AFTER", 30*24*time.Hour),
@@ -153,6 +161,9 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	p.errs = append(p.errs, cfg.validateSecrets()...)
 	p.errs = append(p.errs, cfg.validateGRPC()...)
+	if cfg.ReconcileMode != "memory" && cfg.ReconcileMode != "sql" {
+		p.errs = append(p.errs, fmt.Errorf("RECONCILE_MODE: expected memory or sql, got %q", cfg.ReconcileMode))
+	}
 	return cfg, errors.Join(p.errs...)
 }
 

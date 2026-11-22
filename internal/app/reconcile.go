@@ -12,6 +12,20 @@ import (
 type ReconcileService struct {
 	statements StatementReader
 	ledger     LedgerReader
+	comparer   LedgerComparer
+}
+
+// LedgerComparer compara o extrato com o ledger do período no próprio banco,
+// sem carregar os lançamentos na memória (volumes grandes). Deve devolver o
+// mesmo Report que domain.Reconcile devolveria.
+type LedgerComparer interface {
+	Reconcile(ctx context.Context, period domain.Period, statement []domain.StatementLine) (domain.Report, error)
+}
+
+// WithComparer liga a comparação no banco no lugar da comparação em memória.
+func (s *ReconcileService) WithComparer(c LedgerComparer) *ReconcileService {
+	s.comparer = c
+	return s
 }
 
 // NewReconcileService cria o caso de uso de conciliação.
@@ -28,6 +42,13 @@ func (s *ReconcileService) Reconcile(ctx context.Context, period domain.Period, 
 	statement, err := s.statements.ReadStatement(ctx, ref)
 	if err != nil {
 		return domain.Report{}, fmt.Errorf("read statement %s: %w", ref, err)
+	}
+	if s.comparer != nil {
+		report, err := s.comparer.Reconcile(ctx, period, statement)
+		if err != nil {
+			return domain.Report{}, fmt.Errorf("compare in database: %w", err)
+		}
+		return report, nil
 	}
 	entries, err := s.ledger.EntriesBetween(ctx, period.From, period.To)
 	if err != nil {

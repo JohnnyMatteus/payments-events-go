@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/csvstatement"
 	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/objectstore"
 	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/postgres"
 	"github.com/JohnnyMatteus/payments-events-go/internal/adapter/reportout"
@@ -136,7 +135,7 @@ func runDaily(ctx context.Context, cfg config.Config, logger *slog.Logger, opts 
 		return exitError
 	}
 	defer pool.Close()
-	reconciler := app.NewReconcileService(csvstatement.NewReader(opener), postgres.NewLedgerReader(pool))
+	reconciler := newReconcileService(cfg, opener, pool)
 	runner := app.NewReconciliationRunner(opener.Statements(cfg.StatementsBucket), reconciler,
 		postgres.NewReconciliationStore(pool), logger)
 	summary, err := runner.Run(ctx, opts.period.From, app.TriggerCLI, "cron")
@@ -168,6 +167,6 @@ func reconcile(ctx context.Context, cfg config.Config, logger *slog.Logger, opts
 		return domain.Report{}, err
 	}
 	defer pool.Close()
-	svc := app.NewReconcileService(csvstatement.NewReader(opener), postgres.NewLedgerReader(pool))
+	svc := newReconcileService(cfg, opener, pool)
 	return svc.Reconcile(ctx, opts.period, opts.statement)
 }

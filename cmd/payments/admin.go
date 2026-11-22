@@ -70,7 +70,7 @@ func adminOption(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, aut
 	statements := opener.Statements(cfg.StatementsBucket)
 	runs := postgres.NewReconciliationStore(pool)
 	cases := postgres.NewCaseRepository(pool)
-	reconcile := app.NewReconcileService(csvstatement.NewReader(opener), postgres.NewLedgerReader(pool))
+	reconcile := newReconcileService(cfg, opener, pool)
 
 	admin := httpapi.NewAdminHandler(httpapi.AdminDeps{
 		Reader:      postgres.NewOperationsReader(pool),

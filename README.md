@@ -165,6 +165,7 @@ LocalStack, o relatório de conciliação (faltando, sobrando e valor divergente
 | Segredos do webhook e do banco por porta (Vault e Secrets Manager), com rotação sem downtime | [0014](docs/adr/0014-segredos-por-porta-e-rotacao-sem-downtime.md) |
 | Retenção: ledger imutável (gatilho) e exportado por mês, payloads arquivados em partições, outbox publicado limpo | [0015](docs/adr/0015-retencao-sem-perder-idempotencia-nem-razao.md) |
 | gRPC interno de saldo (só leitura) com token OIDC, papel checado no caso de uso e TLS obrigatório em produção | [0016](docs/adr/0016-grpc-interno-de-saldo-autenticado.md) |
+| Conciliação no banco (`RECONCILE_MODE=sql`) equivalente à em memória, para volumes grandes | [0022](docs/adr/0022-conciliacao-no-banco-para-volumes-grandes.md) |
 | LISTEN/NOTIFY acorda o relay; o polling continua como rede de segurança | [0021](docs/adr/0021-listen-notify-para-acordar-o-relay.md) |
 | Leitura do razão por cursor sem pular linha, com lock de ordem entre escritores e leitor | [0019](docs/adr/0019-leitura-do-razao-por-cursor-sem-pular-linhas.md) |
 | Deploy em Kubernetes com Helm e ArgoCD, sincronização manual e revisão fixada por tag | [0017](docs/adr/0017-deploy-em-kubernetes-com-helm-e-argocd.md) |
@@ -180,7 +181,7 @@ Para defender o núcleo numa entrevista: [roteiro de idempotência](docs/roteiro
 - **Polling no outbox, acordado por `LISTEN/NOTIFY`.** O polling é a garantia (até 1 s quando a notificação se perde); a notificação só reduz a latência típica ([ADR 0021](docs/adr/0021-listen-notify-para-acordar-o-relay.md)). CDC fica para quando o volume justificar.
 - **Sem ordem garantida no broker.** O consumidor de exemplo é comutativo; consumidores que dependem de ordem precisarão de versão por agregado.
 - **Backoff do consumidor segura um slot de prefetch.** Bom para o volume atual; atrasos longos pedem filas de retry com TTL.
-- **Conciliação em memória.** Cerca de 4 ms para 10 mil linhas; milhões de linhas pedem a comparação no banco.
+- **Conciliação em memória por padrão.** Cerca de 4 ms para 10 mil linhas; para milhões de linhas há a comparação no banco (`RECONCILE_MODE=sql`, [ADR 0022](docs/adr/0022-conciliacao-no-banco-para-volumes-grandes.md)), provada equivalente por teste mas não medida; o extrato ainda é lido inteiro para a memória.
 - **LocalStack fixado em 4.5.0.** Versões novas exigem token de conta; MinIO seria uma alternativa só para S3.
 
 ## Próximos passos
@@ -203,7 +204,7 @@ Só o que falta de fato. O que foi escrito e ainda não rodou contra o serviço 
 **Previsto no design doc e não feito**
 
 - CDC no outbox, se o volume justificar.
-- Conciliação em SQL para volumes grandes (hoje em memória).
+- Streaming do extrato para a comparação no banco e a medição dela contra a em memória.
 - Testes de mutação no domínio.
 - Alerta para o job de conciliação com divergência (código 3); no Kubernetes, use a falha do CronJob.
 - Screenshots do painel em `docs/screenshots/` e vídeo de evidência pelos front-ends.

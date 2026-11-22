@@ -122,3 +122,19 @@ func TestLoadValidatesGRPCConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadValidatesReconcileMode(t *testing.T) {
+	t.Parallel()
+	for _, v := range []string{"sql", "memory", ""} {
+		cfg, err := Load(env(map[string]string{"RECONCILE_MODE": v}))
+		if err != nil {
+			t.Errorf("RECONCILE_MODE=%q: %v", v, err)
+		}
+		if v == "" && (cfg.ReconcileMode != "memory" || !cfg.ReconcileIncludeMatches) {
+			t.Errorf("defaults = %q matches=%v, want memory and true", cfg.ReconcileMode, cfg.ReconcileIncludeMatches)
+		}
+	}
+	if _, err := Load(env(map[string]string{"RECONCILE_MODE": "SQL"})); err == nil {
+		t.Error("RECONCILE_MODE=SQL deve falhar (só minúsculas)")
+	}
+}
