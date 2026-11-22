@@ -56,6 +56,12 @@ retention: ## Aplica a política de retenção (outbox publicado, payloads antig
 proto: ## Regenera o código gRPC de api/proto (exige protoc no PATH)
 	./scripts/gen-proto.sh
 
+.PHONY: loadtest
+loadtest: ## Carga no webhook com k6 (RATE=50 DURATION=1m MERCHANTS=200), contra a API local
+	docker run --rm -i --add-host host.docker.internal:host-gateway -v "$(CURDIR)/loadtest:/loadtest:ro" \
+		-e BASE_URL=http://host.docker.internal:$(or $(API_PORT),8085) -e RATE=$(or $(RATE),50) -e DURATION=$(or $(DURATION),1m) \
+		-e MERCHANTS=$(or $(MERCHANTS),200) grafana/k6:1.8.3 run /loadtest/webhook.js
+
 .PHONY: down
 down: ## Para os contêineres (mantém os volumes)
 	$(ALL) down
