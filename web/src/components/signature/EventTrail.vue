@@ -54,12 +54,14 @@ const stuck = computed(() => props.trail.dead_letters.find((d) => d.status === '
     <li class="stage" :class="trail.outbox ? (trail.outbox.status === 'published' ? 'ok' : 'warn') : 'gap'">
       <div class="colhead">3 · Outbox</div>
       <template v-if="trail.outbox">
-        <div class="title">{{ outboxLabel(trail.outbox.status) }}</div>
+        <div class="title">{{ outboxLabel(trail.outbox.status, trail.outbox.archived) }}</div>
         <dl>
           <dt>Mensagem</dt>
           <dd class="mono">{{ trail.outbox.message_id }}</dd>
-          <dt>Tentativas</dt>
-          <dd class="mono">{{ trail.outbox.attempts }}</dd>
+          <template v-if="!trail.outbox.archived">
+            <dt>Tentativas</dt>
+            <dd class="mono">{{ trail.outbox.attempts }}</dd>
+          </template>
           <dt>Publicada</dt>
           <dd class="mono">{{ formatDateTime(trail.outbox.published_at) }}</dd>
           <template v-if="trail.outbox.last_error">

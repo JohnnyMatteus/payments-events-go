@@ -5,6 +5,7 @@
 //	payments relay       publica o outbox no RabbitMQ
 //	payments consumer    consumidor de exemplo (projeção de saldos)
 //	payments watch       concilia sozinho quando um extrato chega ao S3 (fila SQS)
+//	payments retention   aplica a política de retenção (outbox, payloads e arquivo do ledger)
 //	payments reconcile   concilia o extrato CSV com o ledger
 //	payments healthcheck verifica um endpoint HTTP (healthcheck do contêiner)
 //
@@ -45,6 +46,7 @@ comandos:
   relay       publica o outbox no RabbitMQ
   consumer    consumidor de exemplo: projeção de saldos por pagamento
   watch       concilia sozinho quando um extrato chega ao S3 (STATEMENTS_QUEUE_URL)
+  retention   limpa o outbox publicado e arquiva payloads e meses do ledger (ADR 0015)
   reconcile   concilia o extrato CSV com o ledger (payments reconcile -h)
   healthcheck <url>  sai com 0 se a URL responder 2xx (imagem sem shell nem curl)
   version     mostra a versão
@@ -96,6 +98,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 		err = runConsumer(ctx, cfg, logger)
 	case "watch":
 		err = runWatch(ctx, cfg, logger)
+	case "retention":
+		err = runRetention(ctx, cfg, logger)
 	case "reconcile":
 		return runReconcile(ctx, cfg, logger, args[1:], stdout, stderr)
 	default:

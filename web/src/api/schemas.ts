@@ -71,6 +71,7 @@ export const trailSchema = z.object({
       created_at: iso,
       published_at: nullableIso,
       next_attempt_at: iso,
+      archived: z.boolean().optional(),
     })
     .nullable(),
   consumers: z.array(z.object({ consumer: z.string(), consumed_at: iso })),

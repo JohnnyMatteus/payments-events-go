@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
-import type { RunItem } from '@/api/schemas';
+import type { RunItem, Trail } from '@/api/schemas';
+import EventTrail from '@/components/signature/EventTrail.vue';
 import LedgerSpread from '@/components/signature/LedgerSpread.vue';
 import Money from '@/components/signature/Money.vue';
 
@@ -47,5 +48,45 @@ describe('LedgerSpread', () => {
     await rows[1]?.trigger('click');
     expect(w.emitted('select')?.[0]?.[0]).toMatchObject({ transaction_id: 'miss' });
     expect(rows[1]?.find('.case-status').text()).toBe('aberta');
+  });
+});
+
+describe('EventTrail', () => {
+  const trail = (outbox: Trail['outbox']): Trail => ({
+    event: {
+      event_id: 'evt',
+      event_type: 'payment.captured',
+      outcome: 'recorded',
+      merchant_id: 'm',
+      transaction_id: 't',
+      payment_id: 'p',
+      direction: 'credit',
+      amount_cents: 100,
+      currency: 'BRL',
+      occurred_at: at,
+      received_at: at,
+      outbox_status: outbox?.status ?? '',
+      deliveries: 1,
+    },
+    payload: {},
+    ledger: null,
+    outbox,
+    consumers: [],
+    dead_letters: [],
+  });
+
+  it('diz publicada, linha arquivada, e não "sem mensagem", depois da retenção do outbox', () => {
+    const archived = { id: 0, message_id: 'evt', routing_key: '', status: 'published', attempts: 0, created_at: at, published_at: at, next_attempt_at: at, archived: true };
+    const w = mount(EventTrail, { props: { trail: trail(archived) } });
+    const stage = w.findAll('.stage')[2];
+    expect(stage?.text()).toContain('linha do outbox arquivada');
+    expect(stage?.text()).not.toContain('Sem mensagem de integração');
+    expect(stage?.classes()).toContain('ok');
+    expect(stage?.text()).not.toContain('Tentativas');
+  });
+
+  it('sem outbox continua mostrando a lacuna', () => {
+    const w = mount(EventTrail, { props: { trail: trail(null) } });
+    expect(w.findAll('.stage')[2]?.text()).toContain('Sem mensagem de integração');
   });
 });

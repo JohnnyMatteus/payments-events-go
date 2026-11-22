@@ -176,3 +176,26 @@ func TestReaderRoleCanQueryButNotAct(t *testing.T) {
 		t.Fatalf("reader must not reach the service, calls = %v", dl.calls)
 	}
 }
+
+type trailReader struct {
+	app.OperationsReader
+	trail app.EventTrail
+}
+
+func (r trailReader) EventTrail(context.Context, string) (app.EventTrail, error) { return r.trail, nil }
+
+// A retenção do outbox não pode virar "nunca publicada" na API: o campo archived chega à tela.
+func TestEventTrailExposesArchivedOutbox(t *testing.T) {
+	at := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	reader := trailReader{trail: app.EventTrail{Outbox: &app.OutboxView{MessageID: "evt", Status: "published", PublishedAt: &at, Archived: true}}}
+	rec := call(newTestMux(t, AdminDeps{Reader: reader}), http.MethodGet, "/api/v1/events/evt", "token-da-ana", "")
+	var out struct {
+		Outbox struct {
+			Status   string `json:"status"`
+			Archived bool   `json:"archived"`
+		} `json:"outbox"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out.Outbox.Status != "published" || !out.Outbox.Archived {
+		t.Fatalf("body = %s (%v)", rec.Body, err)
+	}
+}
