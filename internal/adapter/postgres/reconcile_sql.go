@@ -86,7 +86,9 @@ func (c *SQLComparer) Reconcile(ctx context.Context, period domain.Period, state
 		forJoin = append(forJoin, []any{int64(i), line.TransactionID})
 	}
 
-	err := pgx.BeginFunc(ctx, c.pool, func(tx pgx.Tx) error {
+	// Um retrato só: a soma e a junção são consultas separadas, e em READ COMMITTED um
+	// lançamento gravado entre elas deixaria o relatório incoerente.
+	err := pgx.BeginTxFunc(ctx, c.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead}, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `CREATE TEMP TABLE reconcile_statement (ord bigint NOT NULL, transaction_id text NOT NULL) ON COMMIT DROP`); err != nil {
 			return fmt.Errorf("create statement table: %w", err)
 		}
